@@ -3,61 +3,213 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SafeRoute Popup Test</title>
+  <title>SafePath Chatbot</title>
   <style>
-    #popup {
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    #crime-popup {
       position: fixed;
       bottom: 20px;
       right: 20px;
       width: 60px;
       height: 60px;
-      background-color: #d32f2f;
+      background-color: #eaeaea;
       border-radius: 50%;
-      color: white;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-      transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease;
-      overflow: hidden;
-      z-index: 999;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
       cursor: pointer;
+      overflow: hidden;
+      transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease;
+      z-index: 1000;
     }
 
-    #popup.expanded {
-      width: 280px;
-      height: 200px;
+    #popup-label {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 13px;
+      color: #333;
+      text-align: center;
+      font-weight: bold;
+      pointer-events: none;
+    }
+
+    #crime-popup.expanded #popup-label {
+      display: none;
+    }
+
+    #crime-popup.expanded {
+      width: 320px;
+      height: 210px;
       border-radius: 16px;
       padding: 10px;
     }
 
     #popup-content {
       display: none;
+      flex-direction: column;
+      height: 100%;
     }
 
-    #popup.expanded #popup-content {
-      display: block;
+    #crime-popup.expanded #popup-content {
+      display: flex;
+    }
+
+    #popup-close {
+      position: absolute;
+      top: 6px;
+      right: 10px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      color: #333;
+    }
+
+    #popup-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-top: 1px;
+      margin-left: 8px;
+      color: #000000;
+    }
+
+    #popup-divider {
+      margin: 0px 0px;
+      margin-top: 9px;
+      border: none;
+      border-top: 2px solid #9e9d9de7;
+    }
+
+    #popup-subtitle {
+      font-size: 14px;
+      margin-top: 8px;
+      margin-left: 8px;
+      color: #000000;
+    }
+
+    #popup-description {
+      font-size: 14px;
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 0px;
+      margin-bottom: 10px;
+      color: #000000;
+    }
+
+    #popup-chat {
+      display: flex;
+    }
+
+    #chat-input {
+      flex: 1;
+      padding: 6px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      resize: none;
+      overflow-y: hidden;
+      line-height: 18px;
+      max-height: 80px;
+    }
+
+    #chat-send {
+      margin-left: 5px;
+      padding: 6px 10px;
+      font-size: 13px;
+      background-color: white;
+      color: #000000;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
 
-<div id="popup">
+<div id="crime-popup">
+  <span id="popup-label">click me!</span>
   <div id="popup-content">
-    <h3>Philadelphia Crime Summary</h3>
-    <p>57 crimes reported this week. Top issues: robbery, assault, car theft.</p>
+    <div id="popup-close">&times;</div>
+    <div id="popup-title">Loading SafePath chatbot...</div>
+    <hr id="popup-divider">
+    <div id="popup-subtitle">Ask about crime and safety! You can ask about:</div>
+    <div id="popup-description">
+      <ul id="description-list"></ul>
+    </div>
+    <div id="popup-chat">
+      <textarea id="chat-input" placeholder="Ask about crime here..." rows="2"></textarea>
+      <button id="chat-send">Enter</button>
+    </div>
   </div>
 </div>
 
 <script>
-  const popup = document.getElementById('popup');
-  const isMobile = window.matchMedia("(pointer: coarse)").matches;
+  const popup = document.getElementById('crime-popup');
+  const input = document.getElementById('chat-input');
+  const send = document.getElementById('chat-send');
+  const closeBtn = document.getElementById('popup-close');
+
+  // default expanded on tap/click
+  let isMobile = window.matchMedia("(pointer: coarse)").matches;
 
   if (isMobile) {
     popup.addEventListener('click', () => {
-      popup.classList.toggle('expanded');
+      if (!popup.classList.contains('expanded')) {
+        popup.classList.add('expanded');
+      }
     });
   } else {
-    popup.addEventListener('mouseenter', () => popup.classList.add('expanded'));
-    popup.addEventListener('mouseleave', () => popup.classList.remove('expanded'));
+    popup.addEventListener('click', () => {
+      if (!popup.classList.contains('expanded')) {
+        popup.classList.add('expanded');
+      }
+    });
   }
+
+  // Close button logic
+  closeBtn.addEventListener('click', (event) => {
+    event.stopPropagation(); // Prevent triggering the expand
+    popup.classList.remove('expanded');
+  });
+
+  // Load dynamic content
+  async function loadCrimeData() {
+    const title = "SafePath Chatbot";
+    const description = [
+      "Recent crime in the area",
+      "Crime statistics in the area",
+      "Tips on how to stay safe, etc."
+    ];
+    document.getElementById('popup-title').textContent = title;
+    const list = document.getElementById('description-list');
+    description.forEach(h => {
+      const li = document.createElement('li');
+      li.textContent = h;
+      list.appendChild(li);
+    });
+  }
+  loadCrimeData();
+
+  // Auto-expand textarea
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+  });
+
+  // Mock chat handler
+  send.addEventListener('click', () => {
+    const query = input.value.toLowerCase();
+    if (!query.includes("crime") && !query.includes("robbery") && !query.includes("safe") && !query.includes("shooting")) {
+      alert("buddy i can only do crime and safety...");
+    } else {
+      alert("ts hasn't been made yet bro");
+    }
+    input.value = '';
+    input.style.height = 'auto';
+  });
 </script>
 
 </body>
