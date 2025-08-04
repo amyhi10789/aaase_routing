@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SafeRoute Popup Test</title>
+  <style>
+    #popup {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 60px;
+      height: 60px;
+      background-color: #d32f2f;
+      border-radius: 50%;
+      color: white;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease;
+      overflow: hidden;
+      z-index: 999;
+      cursor: pointer;
+    }
+
+    #popup.expanded {
+      width: 280px;
+      height: 200px;
+      border-radius: 16px;
+      padding: 10px;
+    }
+
+    #popup-content {
+      display: none;
+    }
+
+    #popup.expanded #popup-content {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+<div id="popup">
+  <div id="popup-content">
+    <h3>Philadelphia Crime Summary</h3>
+    <p>57 crimes reported this week. Top issues: robbery, assault, car theft.</p>
+  </div>
+</div>
+
+<script>
+  const popup = document.getElementById('popup');
+  const isMobile = window.matchMedia("(pointer: coarse)").matches;
+
+  if (isMobile) {
+    popup.addEventListener('click', () => {
+      popup.classList.toggle('expanded');
+    });
+  } else {
+    popup.addEventListener('mouseenter', () => popup.classList.add('expanded'));
+    popup.addEventListener('mouseleave', () => popup.classList.remove('expanded'));
+  }
+</script>
+
+</body>
+</html>
