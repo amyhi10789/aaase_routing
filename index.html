@@ -216,15 +216,15 @@
   // Function to adjust popup height based on chat content
   function adjustPopupHeight() {
     if (popup.classList.contains('expanded')) {
-      const initialHeight = 290; // Initial expanded height
-      const maxHeight = 660; // Maximum height
+      const initialHeight = 290; 
+      const maxHeight = 660; 
       const chatHeight = chatHistory.scrollHeight;
       const descriptionHeight = document.getElementById('popup-description').offsetHeight;
       const titleHeight = document.getElementById('popup-title').offsetHeight;
       const subtitleHeight = document.getElementById('popup-subtitle').offsetHeight;
       const dividerHeight = document.getElementById('popup-divider').offsetHeight;
       const chatInputHeight = document.getElementById('popup-chat').offsetHeight;
-      const padding = 20; // Account for padding (10px top + 10px bottom)
+      const padding = 20; 
 
       // Calculate total required height (excluding input area as it's fixed)
       let totalHeight = titleHeight + subtitleHeight + dividerHeight + descriptionHeight + chatHeight + padding;
@@ -243,7 +243,7 @@
   popup.addEventListener('click', () => {
     if (!popup.classList.contains('expanded')) {
       popup.classList.add('expanded');
-      setTimeout(adjustPopupHeight, 300); // Adjust height after expansion transition
+      setTimeout(adjustPopupHeight, 300); 
     }
   });
 
@@ -251,7 +251,7 @@
   closeBtn.addEventListener('click', (event) => {
     event.stopPropagation();
     popup.classList.remove('expanded');
-    popup.style.height = '60px'; // Reset to initial collapsed height
+    popup.style.height = '60px';
   });
 
   // Load dynamic content
@@ -307,10 +307,26 @@
     adjustPopupHeight();
 
     // Simulate delay
-    setTimeout(() => {
-      botMsg.innerHTML = "I don't have an answer right now.";
-      adjustPopupHeight(); // Adjust height after bot response
-    }, 10000);
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      try {
+        const res = await fetch('http://localhost:5000/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          }),
+        });
+
+        const data = await res.json();
+        botMsg.textContent = data.response;
+        adjustPopupHeight();
+      } catch (err) {
+        botMsg.textContent = "Sorry, something went wrong. Try again later.";
+        adjustPopupHeight();
+      }
+    });
   });
 
   // Adjust height on window resize
