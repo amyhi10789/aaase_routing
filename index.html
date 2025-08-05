@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,7 +10,20 @@
       margin: 0;
       font-family: 'Segoe UI', sans-serif;
     }
-
+    @keyframes bounce {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      30% {
+        transform: translateY(-12px);
+      }
+      60% {
+        transform: translateY(-4px);
+      }
+    }
+    .bounce-on-load {
+      animation: bounce 1s ease-in-out infinite;
+    }
     #crime-popup {
       position: fixed;
       bottom: 20px;
@@ -24,7 +38,6 @@
       transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease;
       z-index: 1000;
     }
-
     #popup-label {
       position: absolute;
       top: 50%;
@@ -36,11 +49,9 @@
       font-weight: bold;
       pointer-events: none;
     }
-
     #crime-popup.expanded #popup-label {
       display: none;
     }
-
     #crime-popup.expanded {
       width: 320px;
       height: 290px; /* Initial height */
@@ -48,17 +59,14 @@
       border-radius: 16px;
       padding: 10px;
     }
-
     #popup-content {
       display: none;
       flex-direction: column;
       height: 100%;
     }
-
     #crime-popup.expanded #popup-content {
       display: flex;
     }
-
     #popup-close {
       position: absolute;
       top: 6px;
@@ -68,7 +76,6 @@
       cursor: pointer;
       color: #333;
     }
-
     #popup-title {
       font-size: 18px;
       font-weight: bold;
@@ -76,28 +83,24 @@
       margin-left: 8px;
       color: #000000;
     }
-
     #popup-divider {
       margin: 0px 0px;
       margin-top: 9px;
       border: none;
       border-top: 2px solid #9e9d9de7;
     }
-
     #popup-subtitle {
       font-size: 14px;
       margin-top: 8px;
       margin-left: 8px;
       color: #000000;
     }
-
     #popup-description {
       font-size: 14px;
       margin-top: 0px;
       margin-bottom: 0px;
       color: #000000;
     }
-
     #popup-chat {
       display: flex;
       position: absolute;
@@ -105,7 +108,6 @@
       left: 10px;
       right: 10px;
     }
-
     #chat-input {
       flex: 1;
       padding: 6px;
@@ -117,7 +119,6 @@
       line-height: 18px;
       max-height: 80px;
     }
-
     #chat-send {
       margin-left: 5px;
       padding: 6px 10px;
@@ -129,7 +130,6 @@
       cursor: pointer;
       font-weight: bold;
     }
-
     .chat-bubble {
       max-width: 90%;
       padding: 6px 10px;
@@ -140,19 +140,16 @@
       display: inline-block;
       word-wrap: break-word;
     }
-
     .user-message {
       align-self: flex-end;
       background-color: #ffb0c4;
       text-align: right;
     }
-
     .bot-message {
       align-self: flex-start;
       background-color: #f0f0f0;
       text-align: left;
     }
-
     #chat-history {
       display: flex;
       flex-direction: column;
@@ -165,19 +162,15 @@
       display: inline-block;
       font-size: 18px;
     }
-
     .dots span {
       animation: blink 1.2s infinite;
     }
-
     .dots span:nth-child(2) {
       animation-delay: 0.2s;
     }
-
     .dots span:nth-child(3) {
       animation-delay: 0.4s;
     }
-
     @keyframes blink {
       0%, 80%, 100% { opacity: 0.3; }
       40% { opacity: 1; }
@@ -185,7 +178,6 @@
   </style>
 </head>
 <body>
-
 <div id="crime-popup">
   <span id="popup-label">click me!</span>
   <div id="popup-content">
@@ -203,16 +195,23 @@
     </div>
   </div>
 </div>
-
 <script>
   const popup = document.getElementById('crime-popup');
   const input = document.getElementById('chat-input');
   const send = document.getElementById('chat-send');
   const closeBtn = document.getElementById('popup-close');
   const chatHistory = document.getElementById('chat-history');
-
   let isMobile = window.matchMedia("(pointer: coarse)").matches;
-
+  // Start bounce animation on load
+  popup.classList.add('bounce-on-load');
+  // Stop bounce animation after 15 seconds
+  setTimeout(() => {
+    popup.classList.remove('bounce-on-load');
+  }, 15000);
+  // Stop bounce animation immediately when user clicks anywhere inside the popup
+  popup.addEventListener('click', () => {
+    popup.classList.remove('bounce-on-load');
+  });
   // Function to adjust popup height based on chat content
   function adjustPopupHeight() {
     if (popup.classList.contains('expanded')) {
@@ -225,20 +224,15 @@
       const dividerHeight = document.getElementById('popup-divider').offsetHeight;
       const chatInputHeight = document.getElementById('popup-chat').offsetHeight;
       const padding = 20; 
-
       // Calculate total required height (excluding input area as it's fixed)
       let totalHeight = titleHeight + subtitleHeight + dividerHeight + descriptionHeight + chatHeight + padding;
-
       // Cap the height at maxHeight
       totalHeight = Math.min(totalHeight, maxHeight);
-
       // Ensure height doesn't go below initial height
       totalHeight = Math.max(totalHeight, initialHeight);
-
       popup.style.height = totalHeight + 'px';
     }
   }
-
   // Open popup
   popup.addEventListener('click', () => {
     if (!popup.classList.contains('expanded')) {
@@ -246,14 +240,12 @@
       setTimeout(adjustPopupHeight, 300); 
     }
   });
-
   // Close popup
   closeBtn.addEventListener('click', (event) => {
     event.stopPropagation();
     popup.classList.remove('expanded');
     popup.style.height = '60px';
   });
-
   // Load dynamic content
   async function loadCrimeData() {
     document.getElementById('popup-title').textContent = "SafePath Chatbot";
@@ -271,45 +263,37 @@
     setTimeout(adjustPopupHeight, 0); // Adjust height after content is loaded
   }
   loadCrimeData();
-
   // Auto-expand textarea
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = input.scrollHeight + 'px';
     adjustPopupHeight();
   });
-
   // Send message and show bot animation
   send.addEventListener('click', () => {
     const text = input.value.trim();
     if (!text) return;
-
     // Show user message
     const userMsg = document.createElement('div');
     userMsg.className = 'chat-bubble user-message';
     userMsg.textContent = text;
     chatHistory.appendChild(userMsg);
-
     // Add animated bot dots
     const botMsg = document.createElement('div');
     botMsg.className = 'chat-bubble bot-message';
     botMsg.innerHTML = '<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
     chatHistory.appendChild(botMsg);
-
     // Scroll to bottom
     chatHistory.scrollTop = chatHistory.scrollHeight;
-
     // Clear input
     input.value = '';
     input.style.height = 'auto';
-
-    // Adjust popup height
+    // adjusting popup height
     adjustPopupHeight();
-
-    // Simulate delay
+    // getting the location and sending the message to backend
     navigator.geolocation.getCurrentPosition(async (position) => {
       try {
-        const res = await fetch('http://localhost:5000/api/chat', {
+        const response = await fetch('http://localhost:5000/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -318,20 +302,17 @@
             lng: position.coords.longitude,
           }),
         });
-
-        const data = await res.json();
+        const data = await response.json();
         botMsg.textContent = data.response;
         adjustPopupHeight();
-      } catch (err) {
+      } catch (error) {
         botMsg.textContent = "Sorry, something went wrong. Try again later.";
         adjustPopupHeight();
       }
     });
   });
-
   // Adjust height on window resize
   window.addEventListener('resize', adjustPopupHeight);
 </script>
-
 </body>
 </html>
