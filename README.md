@@ -1,4 +1,4 @@
-# aaase_routing
+# AAASE SafePath
 
 This is the repository for the project SafePath at AAASE Summer Academy. SafePath is an AI-powered navigation app designed to help people find safe paths through larger urban cities, and assist them with safety concerns.
 
