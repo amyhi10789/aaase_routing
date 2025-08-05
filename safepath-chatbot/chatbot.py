@@ -330,7 +330,6 @@ def chat():
     try:
         location = reverse_geocode(lat, lng)
         
-        # Check if the query is related to crime/safety or location-based
         if not is_crime_or_safety_related(message):
             return jsonify({"response": "I'm sorry, I can only answer questions related to crime and safety in your area. Please ask about local crime statistics, safety concerns, or security issues."}), 200
         
@@ -361,7 +360,7 @@ Keep your responses short - always make sure they're under 150 words.
 """
 
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",  # Using the latest GPT-4 model
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message}
@@ -377,7 +376,6 @@ Keep your responses short - always make sure they're under 150 words.
         print("Error processing chat request:", str(e))
         return jsonify({"response": "Sorry, something went wrong. Try again later."}), 500
 
-# Optional: Add endpoint to check news API status
 @app.route("/api/news-status", methods=["GET"])
 def news_status():
     try:
@@ -390,7 +388,6 @@ def news_status():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Optional: Add endpoint to test news fetching for a location
 @app.route("/api/test-news", methods=["POST"])
 def test_news():
     try:
@@ -407,7 +404,6 @@ def test_news():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Optional: Add endpoint to clear conversation history
 @app.route("/api/clear-history", methods=["POST"])
 def clear_history():
     try:
@@ -422,7 +418,6 @@ def clear_history():
 def serve_index():
     return send_from_directory(app.static_folder, "index.html")
 
-# Serve any static files (like CSS/JS/images) in the frontend folder
 @app.route("/<path:path>")
 def serve_static(path):
     return send_from_directory(app.static_folder, path)
