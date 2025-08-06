@@ -98,6 +98,25 @@
     .bounce-on-load {
       animation: bounce 1s ease-in-out infinite;
     }
+
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      }
+      50% {
+        transform: scale(1.05);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      }
+    }
+
+    .pulse-animation {
+      animation: pulse 2s ease-in-out;
+    }
     
     #crime-popup {
       position: fixed;
@@ -385,6 +404,26 @@
       font-size: 12px;
       margin-top: 5px;
     }
+
+    /* Location marker animation */
+    .location-found-marker {
+      animation: locationFound 0.6s ease-out;
+    }
+
+    @keyframes locationFound {
+      0% {
+        transform: scale(0);
+        opacity: 0;
+      }
+      50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
   </style>
 </head>
 <body>
@@ -438,6 +477,7 @@
     let directionsRenderer;
     let infoWindow;
     let loadingTimeout;
+    let destinationMarkers = []; // Store destination markers
     
     const popup = document.getElementById('crime-popup');
     const input = document.getElementById('chat-input');
@@ -474,6 +514,121 @@
       setTimeout(() => {
         loadingScreen.style.display = 'none';
       }, 500);
+    }
+
+    // Clear existing destination markers
+    function clearDestinationMarkers() {
+      destinationMarkers.forEach(marker => {
+        marker.setMap(null);
+      });
+      destinationMarkers = [];
+    }
+
+    // Add destination marker with animation
+    function addDestinationMarker(location, title, address) {
+      // Clear existing destination markers
+      clearDestinationMarkers();
+
+      const marker = new google.maps.Marker({
+        position: { lat: location.lat, lng: location.lng },
+        map: map,
+        title: title || "Destination",
+        icon: {
+          path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+          scale: 8,
+          fillColor: "#EA4335",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
+        animation: google.maps.Animation.DROP
+      });
+
+      destinationMarkers.push(marker);
+
+      // Create info window
+      const infoContent = `
+        <div style="max-width: 250px; font-family: 'Segoe UI', sans-serif;">
+          <h3 style="margin: 0 0 8px 0; color: #333;">${title || 'Location'}</h3>
+          <p style="margin: 0 0 12px 0; font-size: 13px; color: #666;">${address}</p>
+          <div style="display: flex; gap: 8px;">
+            <button onclick="getDirectionsToLocation({lat: ${location.lat}, lng: ${location.lng}}, '${title || 'Location'}')" 
+                    style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+              Get Directions
+            </button>
+            <button onclick="centerMapOnLocation({lat: ${location.lat}, lng: ${location.lng}})" 
+                    style="background: #34a853; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+              Center Map
+            </button>
+          </div>
+        </div>
+      `;
+
+      if (infoWindow) {
+        infoWindow.setContent(infoContent);
+        infoWindow.open(map, marker);
+      }
+
+      // Animate the chatbot popup
+      popup.classList.add('pulse-animation');
+      setTimeout(() => {
+        popup.classList.remove('pulse-animation');
+      }, 2000);
+
+      return marker;
+    }
+
+    // Center map on a specific location
+    function centerMapOnLocation(location) {
+      if (map) {
+        map.setCenter(location);
+        map.setZoom(16);
+      }
+    }
+
+    // Get directions to a specific location
+    function getDirectionsToLocation(destination, placeName) {
+      if (!userLocation || !directionsService) {
+        alert('Your location or directions service not available');
+        return;
+      }
+
+      const request = {
+        origin: userLocation,
+        destination: destination,
+        travelMode: google.maps.TravelMode.DRIVING,
+        provideRouteAlternatives: true
+      };
+
+      directionsService.route(request, (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK) {
+          directionsRenderer.setDirections(result);
+          showDirectionsPanel(result, placeName);
+        } else {
+          console.error('Directions request failed:', status);
+          alert('Could not get directions to this location');
+        }
+      });
+    }
+
+    // Navigate to location based on chatbot response
+    function navigateToLocation(locationData) {
+      if (!map || !locationData) return;
+
+      const { lat, lng, formatted_address } = locationData;
+      
+      // Move map to the location
+      map.setCenter({ lat, lng });
+      map.setZoom(15);
+      
+      // Add marker with animation
+      const marker = addDestinationMarker(
+        { lat, lng }, 
+        "AI Found Location", 
+        formatted_address
+      );
+      
+      console.log('Navigated to:', formatted_address);
     }
 
     // Initialize map with fallback
@@ -676,6 +831,20 @@
         
         map.controls[google.maps.ControlPosition.TOP_RIGHT].push(centerControl);
 
+        // Clear markers control
+        const clearControl = document.createElement('div');
+        clearControl.className = 'custom-map-control';
+        clearControl.innerHTML = '🗑️ Clear Markers';
+        clearControl.addEventListener('click', () => {
+          clearDestinationMarkers();
+          if (infoWindow) {
+            infoWindow.close();
+          }
+          closeDirections();
+        });
+        
+        map.controls[google.maps.ControlPosition.TOP_RIGHT].push(clearControl);
+
         // Search bar control
         const searchContainer = document.createElement('div');
         searchContainer.className = 'search-container';
@@ -747,38 +916,17 @@
 
       placesService.getDetails(request, (place, status) => {
         if (status === google.maps.places.PlacesServiceStatus.OK && place.geometry) {
-          const marker = new google.maps.Marker({
-            position: place.geometry.location,
-            map: map,
-            title: place.name,
-            icon: {
-              path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-              scale: 6,
-              fillColor: "#EA4335",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            }
-          });
+          const marker = addDestinationMarker(
+            {
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng()
+            },
+            place.name,
+            place.formatted_address
+          );
 
           map.setCenter(place.geometry.location);
           map.setZoom(15);
-
-          const infoContent = `
-            <div style="max-width: 200px;">
-              <h3 style="margin: 0 0 8px 0;">${place.name}</h3>
-              <p style="margin: 0 0 8px 0; font-size: 12px;">${place.formatted_address}</p>
-              ${place.rating ? `<p style="margin: 0 0 8px 0;">⭐ ${place.rating}</p>` : ''}
-              <button onclick="getDirections('${place.place_id}')" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
-                Get Directions
-              </button>
-            </div>
-          `;
-
-          if (infoWindow) {
-            infoWindow.setContent(infoContent);
-            infoWindow.open(map, marker);
-          }
 
           marker.placeInfo = place;
         }
@@ -964,6 +1112,7 @@
           "Recent crime trends in any area",
           "Location-specific information", 
           "Safety tips and security advice, etc.",
+          "Navigate to places by typing them!"
         ];
         const list = document.getElementById('description-list');
         list.innerHTML = ''; // Clear existing content
@@ -1041,7 +1190,31 @@
         }
         
         const data = await response.json();
-        botMsg.textContent = data.response || "I received your message but couldn't generate a response.";
+        
+        // Check if location was found and navigate
+        if (data.location_found && data.location_data) {
+          // Navigate to the found location
+          navigateToLocation(data.location_data);
+          
+          // Update bot message with location info
+          botMsg.innerHTML = `
+            <div>${data.response}</div>
+            <div style="margin-top: 8px; padding: 6px; background: rgba(0,255,0,0.1); border-radius: 4px; font-size: 11px;">
+              📍 I've moved the map to show you this location!
+            </div>
+          `;
+        } else if (data.location_found === false) {
+          // Location not found
+          botMsg.innerHTML = `
+            <div>${data.response}</div>
+            <div style="margin-top: 8px; padding: 6px; background: rgba(255,0,0,0.1); border-radius: 4px; font-size: 11px;">
+              ❌ Couldn't find that location on the map
+            </div>
+          `;
+        } else {
+          // Regular response
+          botMsg.textContent = data.response || "I received your message but couldn't generate a response.";
+        }
         
       } catch (error) {
         console.error('Chat error:', error);
@@ -1105,6 +1278,8 @@
     window.selectRoute = selectRoute;
     window.closeDirections = closeDirections;
     window.getDirections = getDirections;
+    window.getDirectionsToLocation = getDirectionsToLocation;
+    window.centerMapOnLocation = centerMapOnLocation;
   </script>
 </body>
 </html>

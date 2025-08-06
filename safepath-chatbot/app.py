@@ -9,6 +9,7 @@ from datetime import datetime
 import json
 import traceback
 import time
+import re
 
 load_dotenv()
 
@@ -79,6 +80,119 @@ def set_cache(cache_key, data):
         'data': data,
         'timestamp': time.time()
     }
+
+def geocode_place(place_name):
+    """Geocode a place name to coordinates using Google Geocoding API"""
+    if not PLACES_API_KEY:
+        return None
+    
+    cache_key = f"geocode_place_{place_name}"
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
+    try:
+        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {
+            'address': place_name,
+            'key': PLACES_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'OK' and data['results']:
+                result = data['results'][0]
+                location_data = {
+                    'lat': result['geometry']['location']['lat'],
+                    'lng': result['geometry']['location']['lng'],
+                    'formatted_address': result['formatted_address'],
+                    'place_id': result.get('place_id', ''),
+                    'types': result.get('types', [])
+                }
+                set_cache(cache_key, location_data)
+                return location_data
+        return None
+    except Exception as e:
+        print(f"Geocoding error: {e}")
+        return None
+
+def detect_location_intent(message):
+    """Detect if the user wants to navigate to a specific location using NLP patterns"""
+    message_lower = message.lower().strip()
+    
+    # Patterns that indicate location navigation intent
+    navigation_patterns = [
+        r'(?:show me|take me to|go to|navigate to|find|locate|search for)\s+(.+)',
+        r'(?:where is|what\'s at|crime at|safety at|how safe is)\s+(.+)',
+        r'(?:i want to go to|i\'m going to|heading to|going to visit)\s+(.+)',
+        r'(?:directions to|route to|how to get to)\s+(.+)',
+        r'(?:is\s+)?(.+?)\s+(?:safe|dangerous|crime|crimes)',
+        r'crime (?:in|at|near)\s+(.+)',
+        r'safety (?:in|at|near)\s+(.+)',
+        r'(.+?)\s+crime rate',
+        r'(.+?)\s+crime statistics',
+    ]
+    
+    for pattern in navigation_patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            potential_location = match.group(1).strip()
+            # Clean up the extracted location
+            potential_location = clean_location_string(potential_location)
+            if is_valid_location(potential_location):
+                return potential_location
+    
+    # Check for standalone location mentions (e.g., just "New York" or "Central Park")
+    if is_standalone_location(message_lower):
+        return clean_location_string(message_lower)
+    
+    return None
+
+def clean_location_string(location):
+    """Clean and normalize location string"""
+    # Remove common stop words that aren't part of location names
+    stop_words = ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'very', 'really', 'quite', 'so', 'too']
+    words = location.split()
+    cleaned_words = [word for word in words if word.lower() not in stop_words]
+    return ' '.join(cleaned_words).strip()
+
+def is_valid_location(location):
+    """Check if the extracted text looks like a valid location"""
+    if not location or len(location) < 2:
+        return False
+    
+    # Filter out common non-location words
+    invalid_terms = [
+        'here', 'there', 'this', 'that', 'it', 'they', 'them', 'us', 'we',
+        'crime', 'safety', 'safe', 'dangerous', 'area', 'place', 'location',
+        'statistics', 'rate', 'news', 'report', 'incident'
+    ]
+    
+    if location.lower() in invalid_terms:
+        return False
+    
+    # Must contain at least one letter
+    if not re.search(r'[a-zA-Z]', location):
+        return False
+    
+    return True
+
+def is_standalone_location(message):
+    """Check if the message is likely just a location name"""
+    words = message.split()
+    if len(words) > 4:  # Too many words to be a simple location
+        return False
+    
+    # Common location indicators
+    location_indicators = [
+        'park', 'street', 'ave', 'avenue', 'road', 'rd', 'blvd', 'boulevard',
+        'square', 'plaza', 'center', 'centre', 'mall', 'university', 'college',
+        'hospital', 'airport', 'station', 'beach', 'mountain', 'lake', 'river',
+        'city', 'town', 'village', 'county'
+    ]
+    
+    return any(indicator in message for indicator in location_indicators)
 
 def reverse_geocode(lat, lng):
     """Reverse geocode coordinates to location name with caching"""
@@ -442,7 +556,8 @@ def is_crime_or_safety_related(message):
         'kidnapping', 'rape', 'sexual assault', 'stalking', 'threats',
         'crime rate', 'crime statistics', 'police report', 'incident',
         'law enforcement', 'criminal activity', 'public safety', 'neighborhood',
-        'area', 'location', 'here', 'near', 'around'
+        'area', 'location', 'here', 'near', 'around', 'show me', 'take me to',
+        'go to', 'navigate to', 'find', 'locate', 'where is', 'directions'
     ]
     
     return any(keyword in message_lower for keyword in crime_safety_keywords)
@@ -469,6 +584,46 @@ def chat():
         
         # Get location name
         location = reverse_geocode(lat, lng)
+        
+        # Check for location navigation intent first
+        detected_location = detect_location_intent(message)
+        location_data = None
+        
+        if detected_location:
+            print(f"Detected location intent: {detected_location}")
+            location_data = geocode_place(detected_location)
+            
+            if location_data:
+                print(f"Successfully geocoded: {location_data}")
+                # Get crime data for the requested location
+                requested_location = location_data['formatted_address']
+                crime_articles = fetch_crime_news(global_query=detected_location)
+                formatted_articles = format_news_for_ai(crime_articles)
+                
+                # Create response with location information
+                response_text = f"I found {detected_location} on the map! I've moved the map to show you this location: {location_data['formatted_address']}. "
+                
+                # Add crime/safety info if available
+                if crime_articles:
+                    response_text += f"Here's what I found about safety in that area: {formatted_articles[:200]}..."
+                else:
+                    response_text += "I don't have recent crime data for this specific location, but I've marked it on the map for you."
+                
+                add_to_conversation_history(session_id, message, response_text, location)
+                
+                return jsonify({
+                    "response": response_text,
+                    "location_found": True,
+                    "location_data": location_data
+                })
+            else:
+                response_text = f"I couldn't find the exact location '{detected_location}' on the map. Could you try being more specific or check the spelling?"
+                add_to_conversation_history(session_id, message, response_text, location)
+                
+                return jsonify({
+                    "response": response_text,
+                    "location_found": False
+                })
         
         # Check if query is crime/safety related
         if not is_crime_or_safety_related(message):
