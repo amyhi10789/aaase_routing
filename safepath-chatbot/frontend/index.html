@@ -290,6 +290,88 @@
       background-color: rgba(255, 255, 255, 1);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
+
+    /* Search bar styling */
+    .search-container {
+      background-color: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 25px;
+      margin: 10px;
+      padding: 8px 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      display: flex;
+      align-items: center;
+      min-width: 300px;
+      max-width: 400px;
+    }
+
+    #places-search {
+      border: none;
+      outline: none;
+      background: transparent;
+      flex: 1;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 14px;
+      padding: 4px 8px;
+    }
+
+    .search-icon {
+      color: #666;
+      margin-right: 8px;
+    }
+
+    /* Directions panel */
+    #directions-panel {
+      position: fixed;
+      top: 80px;
+      left: 10px;
+      width: 300px;
+      max-height: 400px;
+      background-color: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      display: none;
+      overflow-y: auto;
+      z-index: 1000;
+    }
+
+    #directions-panel h3 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .directions-close {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      color: #666;
+    }
+
+    .route-option {
+      padding: 8px;
+      margin: 4px 0;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .route-option:hover {
+      background-color: rgba(0, 0, 0, 0.05);
+    }
+
+    .route-option.selected {
+      background-color: rgba(66, 133, 244, 0.1);
+      border-color: #4285f4;
+    }
   </style>
 </head>
 <body>
@@ -305,6 +387,13 @@
   <!-- Map Container -->
   <div id="map"></div>
   <div id="map-overlay"></div>
+
+  <!-- Directions Panel -->
+  <div id="directions-panel">
+    <div class="directions-close" onclick="closeDirections()">&times;</div>
+    <h3>Directions</h3>
+    <div id="directions-content"></div>
+  </div>
 
   <!-- Chatbot Popup -->
   <div id="crime-popup">
@@ -330,6 +419,12 @@
     let map;
     let userMarker;
     let userLocation = null;
+    let placesService;
+    let autocompleteService;
+    let directionsService;
+    let directionsRenderer;
+    let infoWindow;
+    
     const popup = document.getElementById('crime-popup');
     const input = document.getElementById('chat-input');
     const send = document.getElementById('chat-send');
@@ -338,8 +433,11 @@
     const loadingScreen = document.getElementById('loading-screen');
     let isMobile = window.matchMedia("(pointer: coarse)").matches;
 
-    // Replace with your Google Maps API key
-    const GOOGLE_MAPS_API_KEY = '{{ mapsApiKey }}'; // Template syntax varies by framework
+    // API keys will be injected by Flask
+    const GOOGLE_MAPS_API_KEY = 'MAPS_JAVASCRIPT_KEY';
+    const PLACES_API_KEY = 'PLACES_API_KEY';
+    const DIRECTIONS_API_KEY = 'DIRECTIONS_API_KEY';
+    const ROUTES_API_KEY = 'ROUTES_API_KEY';
 
     // Initialize map
     function initMap() {
@@ -396,6 +494,17 @@
             fullscreenControl: true
           });
 
+          // Initialize services
+          placesService = new google.maps.places.PlacesService(map);
+          autocompleteService = new google.maps.places.AutocompleteService();
+          directionsService = new google.maps.DirectionsService();
+          directionsRenderer = new google.maps.DirectionsRenderer({
+            draggable: true,
+            suppressMarkers: false
+          });
+          directionsRenderer.setMap(map);
+          infoWindow = new google.maps.InfoWindow();
+
           // Add user location marker
           userMarker = new google.maps.Marker({
             position: userLocation,
@@ -440,6 +549,7 @@
           
           // Default to San Francisco if location is denied
           const defaultLocation = { lat: 37.7749, lng: -122.4194 };
+          userLocation = defaultLocation;
           
           map = new google.maps.Map(document.getElementById('map'), {
             center: defaultLocation,
@@ -467,6 +577,14 @@
             streetViewControl: false,
             fullscreenControl: true
           });
+
+          // Initialize services even without user location
+          placesService = new google.maps.places.PlacesService(map);
+          autocompleteService = new google.maps.places.AutocompleteService();
+          directionsService = new google.maps.DirectionsService();
+          directionsRenderer = new google.maps.DirectionsRenderer();
+          directionsRenderer.setMap(map);
+          infoWindow = new google.maps.InfoWindow();
 
           addCustomControls();
           
@@ -501,22 +619,206 @@
       
       map.controls[google.maps.ControlPosition.TOP_RIGHT].push(centerControl);
 
-      // Crime data toggle (placeholder for future feature)
-      const crimeControl = document.createElement('div');
-      crimeControl.className = 'custom-map-control';
-      crimeControl.innerHTML = '🚨 Crime Data';
-      crimeControl.addEventListener('click', () => {
-        // Future: Toggle crime data overlay
-        alert('Crime data overlay feature coming soon!');
-      });
+      // Search bar control
+      const searchContainer = document.createElement('div');
+      searchContainer.className = 'search-container';
+      searchContainer.innerHTML = `
+        <span class="search-icon">🔍</span>
+        <input type="text" id="places-search" placeholder="Search places..." autocomplete="off">
+      `;
       
-      map.controls[google.maps.ControlPosition.TOP_LEFT].push(crimeControl);
+      map.controls[google.maps.ControlPosition.TOP_LEFT].push(searchContainer);
+
+      // Setup search functionality
+      setupPlacesSearch();
     }
 
-    // Load Google Maps API
+    // Setup Places API search functionality
+    function setupPlacesSearch() {
+      const searchInput = document.getElementById('places-search');
+      let searchTimeout;
+
+      searchInput.addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        const query = e.target.value;
+
+        if (query.length < 2) return;
+
+        searchTimeout = setTimeout(() => {
+          // Use Places Autocomplete for suggestions
+          autocompleteService.getPlacePredictions({
+            input: query,
+            location: userLocation ? new google.maps.LatLng(userLocation.lat, userLocation.lng) : null,
+            radius: 50000, // 50km radius
+            componentRestrictions: { country: 'us' } // Remove this for global search
+          }, (predictions, status) => {
+            if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+              // For now, just take the first prediction
+              if (predictions.length > 0) {
+                searchPlace(predictions[0].place_id);
+              }
+            }
+          });
+        }, 300);
+      });
+
+      searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const query = e.target.value;
+          if (query.trim()) {
+            performTextSearch(query);
+          }
+        }
+      });
+    }
+
+    // Search for a place by place ID
+    function searchPlace(placeId) {
+      const request = {
+        placeId: placeId,
+        fields: ['name', 'geometry', 'formatted_address', 'photos', 'rating', 'types']
+      };
+
+      placesService.getDetails(request, (place, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && place.geometry) {
+          // Clear previous markers (except user marker)
+          // Add place marker
+          const marker = new google.maps.Marker({
+            position: place.geometry.location,
+            map: map,
+            title: place.name,
+            icon: {
+              path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+              scale: 6,
+              fillColor: "#EA4335",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            }
+          });
+
+          // Center map on place
+          map.setCenter(place.geometry.location);
+          map.setZoom(15);
+
+          // Show info window
+          const infoContent = `
+            <div style="max-width: 200px;">
+              <h3 style="margin: 0 0 8px 0;">${place.name}</h3>
+              <p style="margin: 0 0 8px 0; font-size: 12px;">${place.formatted_address}</p>
+              ${place.rating ? `<p style="margin: 0 0 8px 0;">⭐ ${place.rating}</p>` : ''}
+              <button onclick="getDirections('${place.place_id}')" style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+                Get Directions
+              </button>
+            </div>
+          `;
+
+          infoWindow.setContent(infoContent);
+          infoWindow.open(map, marker);
+
+          // Store place info for directions
+          marker.placeInfo = place;
+        }
+      });
+    }
+
+    // Perform text search for places
+    function performTextSearch(query) {
+      const request = {
+        query: query,
+        location: userLocation ? new google.maps.LatLng(userLocation.lat, userLocation.lng) : null,
+        radius: 50000,
+        fields: ['name', 'geometry', 'formatted_address', 'place_id']
+      };
+
+      placesService.textSearch(request, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+          if (results.length > 0) {
+            searchPlace(results[0].place_id);
+          }
+        }
+      });
+    }
+
+    // Get directions to a place
+    function getDirections(placeId) {
+      if (!userLocation) {
+        alert('Location not available for directions');
+        return;
+      }
+
+      // Get place details first
+      placesService.getDetails({
+        placeId: placeId,
+        fields: ['geometry', 'name']
+      }, (place, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+          const request = {
+            origin: userLocation,
+            destination: place.geometry.location,
+            travelMode: google.maps.TravelMode.DRIVING,
+            provideRouteAlternatives: true
+          };
+
+          directionsService.route(request, (result, status) => {
+            if (status === google.maps.DirectionsStatus.OK) {
+              directionsRenderer.setDirections(result);
+              showDirectionsPanel(result, place.name);
+            } else {
+              console.error('Directions request failed:', status);
+            }
+          });
+        }
+      });
+    }
+
+    // Show directions panel
+    function showDirectionsPanel(directionsResult, placeName) {
+      const panel = document.getElementById('directions-panel');
+      const content = document.getElementById('directions-content');
+      
+      let html = `<p><strong>To: ${placeName}</strong></p>`;
+      
+      directionsResult.routes.forEach((route, index) => {
+        const leg = route.legs[0];
+        html += `
+          <div class="route-option ${index === 0 ? 'selected' : ''}" onclick="selectRoute(${index})">
+            <strong>Route ${index + 1}</strong><br>
+            Distance: ${leg.distance.text}<br>
+            Duration: ${leg.duration.text}
+          </div>
+        `;
+      });
+
+      content.innerHTML = html;
+      panel.style.display = 'block';
+    }
+
+    // Select a route
+    function selectRoute(routeIndex) {
+      directionsRenderer.setRouteIndex(routeIndex);
+      
+      // Update selected route styling
+      document.querySelectorAll('.route-option').forEach((option, index) => {
+        if (index === routeIndex) {
+          option.classList.add('selected');
+        } else {
+          option.classList.remove('selected');
+        }
+      });
+    }
+
+    // Close directions panel
+    function closeDirections() {
+      document.getElementById('directions-panel').style.display = 'none';
+      directionsRenderer.set('directions', null);
+    }
+
+    // Load Google Maps API with Places library
     function loadGoogleMaps() {
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=initMap`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&callback=initMap`;
       script.async = true;
       script.defer = true;
       document.head.appendChild(script);

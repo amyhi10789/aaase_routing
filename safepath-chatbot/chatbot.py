@@ -16,7 +16,10 @@ CORS(app, supports_credentials=True)
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY")
-MAPS_API_KEY = os.getenv("MAPS_JAVASCRIPT_KEY")  # Add this line
+MAPS_API_KEY = os.getenv("MAPS_JAVASCRIPT_KEY")
+PLACES_API_KEY = os.getenv("PLACES_KEY")
+DIRECTIONS_API_KEY = os.getenv("DIRECTIONS_KEY")
+ROUTES_API_KEY = os.getenv("ROUTES_KEY")
 
 # Store conversation history (in production, use Redis or database)
 conversation_history = {}
@@ -77,6 +80,121 @@ def reverse_geocode(lat, lng):
     except Exception as e:
         print("Geocoding error:", str(e))
         return "unknown location"
+
+def get_place_details(place_id):
+    """Get detailed information about a place using Google Places API"""
+    if not PLACES_API_KEY:
+        return None
+    
+    try:
+        url = f"https://maps.googleapis.com/maps/api/place/details/json"
+        params = {
+            'place_id': place_id,
+            'fields': 'name,formatted_address,geometry,rating,types,photos,reviews',
+            'key': PLACES_API_KEY
+        }
+        
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'OK':
+                return data['result']
+        return None
+    except Exception as e:
+        print(f"Places API error: {e}")
+        return None
+
+def search_nearby_places(lat, lng, place_type="point_of_interest", radius=5000):
+    """Search for nearby places using Google Places API"""
+    if not PLACES_API_KEY:
+        return []
+    
+    try:
+        url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        params = {
+            'location': f"{lat},{lng}",
+            'radius': radius,
+            'type': place_type,
+            'key': PLACES_API_KEY
+        }
+        
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'OK':
+                return data['results'][:10]  # Return top 10 results
+        return []
+    except Exception as e:
+        print(f"Places search error: {e}")
+        return []
+
+def get_directions(origin, destination, mode='driving'):
+    """Get directions using Google Directions API"""
+    if not DIRECTIONS_API_KEY:
+        return None
+    
+    try:
+        url = f"https://maps.googleapis.com/maps/api/directions/json"
+        params = {
+            'origin': f"{origin['lat']},{origin['lng']}",
+            'destination': f"{destination['lat']},{destination['lng']}",
+            'mode': mode,
+            'alternatives': 'true',
+            'key': DIRECTIONS_API_KEY
+        }
+        
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'OK':
+                return data
+        return None
+    except Exception as e:
+        print(f"Directions API error: {e}")
+        return None
+
+def get_routes(origin, destination, travel_mode='DRIVE'):
+    """Get routes using Google Routes API (newer API)"""
+    if not ROUTES_API_KEY:
+        return None
+    
+    try:
+        url = f"https://routes.googleapis.com/directions/v2:computeRoutes"
+        headers = {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': ROUTES_API_KEY,
+            'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline'
+        }
+        
+        data = {
+            "origin": {
+                "location": {
+                    "latLng": {
+                        "latitude": origin['lat'],
+                        "longitude": origin['lng']
+                    }
+                }
+            },
+            "destination": {
+                "location": {
+                    "latLng": {
+                        "latitude": destination['lat'],
+                        "longitude": destination['lng']
+                    }
+                }
+            },
+            "travelMode": travel_mode,
+            "routingPreference": "TRAFFIC_AWARE",
+            "computeAlternativeRoutes": True
+        }
+        
+        response = requests.post(url, json=data, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        print(f"Routes API error: {e}")
+        return None
 
 def fetch_crime_news(location=None, global_query=None):
     """Fetch recent crime and safety news for a specific location or global query"""
@@ -336,6 +454,7 @@ def chat():
         
         # Get crime and safety related news
         crime_articles = fetch_crime_news(location)
+        formatted_articles = format_news_for_ai(crime_articles)
 
         system_prompt = f"""
 You are a specialized safety and crime information chatbot for location-aware services. You do not specialize in any specific location around the world. You can provide information from around the world, information from every country to users.
@@ -351,7 +470,7 @@ Your role is to provide information ONLY about:
 - Safety ratings and concerns
 
 Recent crime and safety news for {location}:
-{crime_articles}
+{formatted_articles}
 
 Always reference the specific location ({location}) in your responses when relevant.
 Provide helpful, accurate, and location-specific crime and safety information.
@@ -363,7 +482,7 @@ Be polite to the user.
 """
 
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message}
@@ -378,6 +497,81 @@ Be polite to the user.
     except Exception as e:
         print("Error processing chat request:", str(e))
         return jsonify({"response": "Sorry, something went wrong. Try again later."}), 500
+
+@app.route("/api/places/search", methods=["POST"])
+def search_places():
+    """Search for places using Google Places API"""
+    data = request.get_json()
+    query = data.get("query")
+    lat = data.get("lat")
+    lng = data.get("lng")
+    
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+    
+    try:
+        places = search_nearby_places(lat or 0, lng or 0, query)
+        return jsonify({"places": places})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/places/details", methods=["POST"])
+def place_details():
+    """Get place details using Google Places API"""
+    data = request.get_json()
+    place_id = data.get("place_id")
+    
+    if not place_id:
+        return jsonify({"error": "Place ID is required"}), 400
+    
+    try:
+        details = get_place_details(place_id)
+        if details:
+            return jsonify({"place": details})
+        else:
+            return jsonify({"error": "Place not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/directions", methods=["POST"])
+def directions():
+    """Get directions using Google Directions API"""
+    data = request.get_json()
+    origin = data.get("origin")
+    destination = data.get("destination")
+    mode = data.get("mode", "driving")
+    
+    if not origin or not destination:
+        return jsonify({"error": "Origin and destination are required"}), 400
+    
+    try:
+        directions_result = get_directions(origin, destination, mode)
+        if directions_result:
+            return jsonify(directions_result)
+        else:
+            return jsonify({"error": "Directions not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/routes", methods=["POST"])
+def routes():
+    """Get routes using Google Routes API"""
+    data = request.get_json()
+    origin = data.get("origin")
+    destination = data.get("destination")
+    travel_mode = data.get("travel_mode", "DRIVE")
+    
+    if not origin or not destination:
+        return jsonify({"error": "Origin and destination are required"}), 400
+    
+    try:
+        routes_result = get_routes(origin, destination, travel_mode)
+        if routes_result:
+            return jsonify(routes_result)
+        else:
+            return jsonify({"error": "Routes not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/news-status", methods=["GET"])
 def news_status():
@@ -419,16 +613,21 @@ def clear_history():
 
 @app.route("/")
 def serve_index():
-    # Read the HTML file and inject the API key
+    # Read the HTML file and inject all API keys
     try:
         with open(os.path.join(app.static_folder, 'index.html'), 'r', encoding='utf-8') as f:
             html_content = f.read()
         
-        # Replace the placeholder API key with the actual key from environment
-        html_content = html_content.replace(
-            "const GOOGLE_MAPS_API_KEY = 'MAPS_JAVASCRIPT_KEY';",
-            f"const GOOGLE_MAPS_API_KEY = '{MAPS_API_KEY or ''}';"
-        )
+        # Replace all API key placeholders with actual keys from environment
+        replacements = {
+            "const GOOGLE_MAPS_API_KEY = 'MAPS_JAVASCRIPT_KEY';": f"const GOOGLE_MAPS_API_KEY = '{MAPS_API_KEY or ''}';",
+            "const PLACES_API_KEY = 'PLACES_API_KEY';": f"const PLACES_API_KEY = '{PLACES_API_KEY or ''}';",
+            "const DIRECTIONS_API_KEY = 'DIRECTIONS_API_KEY';": f"const DIRECTIONS_API_KEY = '{DIRECTIONS_API_KEY or ''}';",
+            "const ROUTES_API_KEY = 'ROUTES_API_KEY';": f"const ROUTES_API_KEY = '{ROUTES_API_KEY or ''}';"
+        }
+        
+        for placeholder, replacement in replacements.items():
+            html_content = html_content.replace(placeholder, replacement)
         
         return render_template_string(html_content)
     except Exception as e:
