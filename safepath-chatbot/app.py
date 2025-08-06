@@ -6,11 +6,14 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import uuid
 from datetime import datetime
+import json
+import traceback
+import time
 
 load_dotenv()
 
 app = Flask(__name__, static_folder="frontend", static_url_path="")
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key-here")  # Add this to your .env file
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key-here")
 CORS(app, supports_credentials=True)
 
 # Initialize OpenAI client
@@ -23,6 +26,10 @@ ROUTES_API_KEY = os.getenv("ROUTES_KEY")
 
 # Store conversation history (in production, use Redis or database)
 conversation_history = {}
+
+# Cache for API responses to improve performance
+api_cache = {}
+CACHE_DURATION = 300  # 5 minutes
 
 def get_or_create_session_id():
     """Get existing session ID or create a new one"""
@@ -52,10 +59,41 @@ def add_to_conversation_history(session_id, user_message, bot_response, location
     if len(conversation_history[session_id]) > 10:
         conversation_history[session_id] = conversation_history[session_id][-10:]
 
+def is_cache_valid(cache_key):
+    """Check if cached data is still valid"""
+    if cache_key not in api_cache:
+        return False
+    
+    cache_time = api_cache[cache_key].get('timestamp', 0)
+    return (time.time() - cache_time) < CACHE_DURATION
+
+def get_from_cache(cache_key):
+    """Get data from cache if valid"""
+    if is_cache_valid(cache_key):
+        return api_cache[cache_key]['data']
+    return None
+
+def set_cache(cache_key, data):
+    """Store data in cache with timestamp"""
+    api_cache[cache_key] = {
+        'data': data,
+        'timestamp': time.time()
+    }
+
 def reverse_geocode(lat, lng):
+    """Reverse geocode coordinates to location name with caching"""
+    cache_key = f"geocode_{lat}_{lng}"
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lng}&zoom=10"
-        response = requests.get(url, headers={'User-Agent': 'LocationBot/1.0'})
+        response = requests.get(url, headers={'User-Agent': 'SafePath/1.0'}, timeout=10)
+        
+        if response.status_code != 200:
+            return "unknown location"
+            
         data = response.json()
         address = data.get("address", {})
         
@@ -76,15 +114,23 @@ def reverse_geocode(lat, lng):
         if country:
             location_parts.append(country)
             
-        return ", ".join(location_parts) if location_parts else "unknown location"
+        result = ", ".join(location_parts) if location_parts else "unknown location"
+        set_cache(cache_key, result)
+        return result
+        
     except Exception as e:
-        print("Geocoding error:", str(e))
+        print(f"Geocoding error: {str(e)}")
         return "unknown location"
 
 def get_place_details(place_id):
     """Get detailed information about a place using Google Places API"""
     if not PLACES_API_KEY:
         return None
+    
+    cache_key = f"place_{place_id}"
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
     
     try:
         url = f"https://maps.googleapis.com/maps/api/place/details/json"
@@ -94,11 +140,13 @@ def get_place_details(place_id):
             'key': PLACES_API_KEY
         }
         
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if data['status'] == 'OK':
-                return data['result']
+                result = data['result']
+                set_cache(cache_key, result)
+                return result
         return None
     except Exception as e:
         print(f"Places API error: {e}")
@@ -109,6 +157,11 @@ def search_nearby_places(lat, lng, place_type="point_of_interest", radius=5000):
     if not PLACES_API_KEY:
         return []
     
+    cache_key = f"nearby_{lat}_{lng}_{place_type}_{radius}"
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
     try:
         url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json"
         params = {
@@ -118,11 +171,13 @@ def search_nearby_places(lat, lng, place_type="point_of_interest", radius=5000):
             'key': PLACES_API_KEY
         }
         
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=15)
         if response.status_code == 200:
             data = response.json()
             if data['status'] == 'OK':
-                return data['results'][:10]  # Return top 10 results
+                result = data['results'][:10]  # Return top 10 results
+                set_cache(cache_key, result)
+                return result
         return []
     except Exception as e:
         print(f"Places search error: {e}")
@@ -143,7 +198,7 @@ def get_directions(origin, destination, mode='driving'):
             'key': DIRECTIONS_API_KEY
         }
         
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=15)
         if response.status_code == 200:
             data = response.json()
             if data['status'] == 'OK':
@@ -188,7 +243,7 @@ def get_routes(origin, destination, travel_mode='DRIVE'):
             "computeAlternativeRoutes": True
         }
         
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.post(url, json=data, headers=headers, timeout=15)
         if response.status_code == 200:
             return response.json()
         return None
@@ -197,7 +252,16 @@ def get_routes(origin, destination, travel_mode='DRIVE'):
         return None
 
 def fetch_crime_news(location=None, global_query=None):
-    """Fetch recent crime and safety news for a specific location or global query"""
+    """Fetch recent crime and safety news with improved error handling and caching"""
+    cache_key = f"news_{location or 'global'}_{global_query or 'default'}"
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
+    if not GNEWS_API_KEY:
+        print("GNews API key not configured")
+        return []
+        
     try:
         if global_query:
             # For global or specific location queries from user
@@ -226,53 +290,78 @@ def fetch_crime_news(location=None, global_query=None):
         
         all_articles = []
         
-        for query in search_queries:
-            url = "https://gnews.io/api/v4/search"
-            params = {
-                "q": query,
-                "lang": "en",
-                "max": 3,  # Reduced per query to get variety
-                "sortby": "publishedAt",  # Get most recent first
-                "apikey": GNEWS_API_KEY
-            }
-            
-            # Don't restrict to US for global queries
-            if location and not global_query:
-                params["country"] = "us"
-            
-            response = requests.get(url, params=params)
-            
-            if response.status_code == 200:
-                data = response.json()
-                articles = data.get("articles", [])
+        for query in search_queries[:2]:  # Limit to first 2 queries to speed up
+            try:
+                url = "https://gnews.io/api/v4/search"
+                params = {
+                    "q": query,
+                    "lang": "en",
+                    "max": 3,  # Reduced per query to get variety
+                    "sortby": "publishedAt",  # Get most recent first
+                    "apikey": GNEWS_API_KEY
+                }
                 
-                for article in articles:
-                    # Avoid duplicates by checking titles
-                    if not any(existing["title"] == article["title"] for existing in all_articles):
-                        all_articles.append({
-                            "title": article["title"],
-                            "description": article["description"],
-                            "url": article["url"],
-                            "publishedAt": article["publishedAt"],
-                            "source": article.get("source", {}).get("name", "Unknown"),
-                            "query_used": query,
-                            "query_type": "global" if global_query or not location else "local"
-                        })
-            else:
-                print(f"GNews API error for query '{query}': {response.status_code}")
+                # Don't restrict to US for global queries
+                if location and not global_query:
+                    params["country"] = "us"
+                
+                response = requests.get(url, params=params, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    articles = data.get("articles", [])
+                    
+                    for article in articles:
+                        # Avoid duplicates by checking titles
+                        if not any(existing["title"] == article["title"] for existing in all_articles):
+                            all_articles.append({
+                                "title": article["title"],
+                                "description": article["description"],
+                                "url": article["url"],
+                                "publishedAt": article["publishedAt"],
+                                "source": article.get("source", {}).get("name", "Unknown"),
+                                "query_used": query,
+                                "query_type": "global" if global_query or not location else "local"
+                            })
+                elif response.status_code == 429:
+                    print("GNews API rate limit exceeded")
+                    break
+                else:
+                    print(f"GNews API error for query '{query}': {response.status_code}")
+                    
+            except requests.RequestException as e:
+                print(f"Network error fetching news for query '{query}': {str(e)}")
+                continue
         
-        # Sort by publication date (most recent first) and limit to 10 total
+        # Sort by publication date (most recent first) and limit to 8 total
         all_articles.sort(key=lambda x: x["publishedAt"], reverse=True)
-        return all_articles[:10]
+        result = all_articles[:8]
+        set_cache(cache_key, result)
+        return result
         
     except Exception as e:
-        print("News API error:", str(e))
+        print(f"News API error: {str(e)}")
         return []
 
 def extract_location_from_query(message):
     """Extract location mentions from user queries for global crime questions"""
     message_lower = message.lower()
     
+    # Known cities/countries/regions to look for
+    locations = [
+        'new york', 'los angeles', 'chicago', 'houston', 'philadelphia',
+        'london', 'paris', 'tokyo', 'beijing', 'moscow', 'mumbai',
+        'canada', 'mexico', 'brazil', 'argentina', 'uk', 'france', 'germany',
+        'italy', 'spain', 'japan', 'china', 'india', 'australia', 'russia',
+        'california', 'texas', 'florida', 'new york state', 'washington',
+        'miami', 'boston', 'seattle', 'denver', 'atlanta', 'detroit', 'korea'
+    ]
+    
+    for location in locations:
+        if location in message_lower:
+            return location
+    
+    import re
     # Common location patterns
     location_patterns = [
         r'in ([A-Za-z\s]+?)(?:\s|$|[,.])',
@@ -283,20 +372,6 @@ def extract_location_from_query(message):
         r'([A-Za-z\s]+?) statistics'
     ]
     
-    # Known cities/countries/regions to look for
-    locations = [
-        'new york', 'los angeles', 'chicago', 'houston', 'philadelphia',
-        'london', 'paris', 'tokyo', 'beijing', 'moscow', 'mumbai',
-        'canada', 'mexico', 'brazil', 'argentina', 'uk', 'france', 'germany',
-        'italy', 'spain', 'japan', 'china', 'india', 'australia', 'russia',
-        'california', 'texas', 'florida', 'new york state'
-    ]
-    
-    for location in locations:
-        if location in message_lower:
-            return location
-    
-    import re
     for pattern in location_patterns:
         match = re.search(pattern, message_lower)
         if match:
@@ -315,11 +390,6 @@ def is_global_crime_query(message):
         'other countries', 'globally', 'world crime', 'international crime'
     ]
     
-    location_indicators = [
-        'in ', 'from ', 'about ', ' crime in ', ' safety in ',
-        ' statistics in ', ' news from '
-    ]
-    
     # Check for explicit global terms
     if any(indicator in message_lower for indicator in global_indicators):
         return True, None
@@ -332,18 +402,18 @@ def is_global_crime_query(message):
     return False, None
 
 def format_news_for_ai(articles):
-    """Format news articles in a structured way for the AI with emphasis on extractable data"""
+    """Format news articles in a structured way for the AI"""
     if not articles:
         return "No recent crime or safety news found for this location."
     
-    formatted_news = f"AVAILABLE NEWS DATA ({len(articles)} articles with extractable statistics and details):\n\n"
+    formatted_news = f"AVAILABLE NEWS DATA ({len(articles)} articles):\n\n"
     
     for i, article in enumerate(articles, 1):
         # Parse date to make it more readable
         try:
             from datetime import datetime
             pub_date = datetime.fromisoformat(article["publishedAt"].replace('Z', '+00:00'))
-            readable_date = pub_date.strftime("%B %d, %Y at %I:%M %p")
+            readable_date = pub_date.strftime("%B %d, %Y")
             days_ago = (datetime.now(pub_date.tzinfo) - pub_date).days
             recency = f"({days_ago} days ago)" if days_ago > 0 else "(Today)"
         except:
@@ -354,58 +424,13 @@ def format_news_for_ai(articles):
         formatted_news += f"HEADLINE: \"{article['title']}\"\n"
         formatted_news += f"SOURCE: {article['source']}\n"
         formatted_news += f"PUBLISHED: {readable_date} {recency}\n"
-        formatted_news += f"FULL DESCRIPTION: {article['description']}\n"
-        formatted_news += f"URL: {article['url']}\n"
-        formatted_news += f"SEARCH QUERY USED: {article['query_used']}\n"
-        formatted_news += "=" * 80 + "\n\n"
-    
-    formatted_news += f"""
-INSTRUCTIONS FOR USING THIS DATA:
-- You can quote exact headlines by using the text after "HEADLINE:"
-- You can reference specific statistics, numbers, percentages mentioned in descriptions
-- You can mention exact publication dates and sources
-- You can tell users about specific incidents described in the articles
-- You can provide the URLs if users want to read full articles
-- Extract and share any numerical data (crime rates, incident counts, percentages, etc.)
-
-EXAMPLE RESPONSES YOU CAN GIVE:
-- "According to a recent article from [Source] published on [Date], titled '[Headline]'..."
-- "Based on the statistics in this recent report..."
-- "A specific incident reported [X days ago] shows..."
-- "The headline '[Exact Headline]' from [Source] indicates..."
-"""
+        formatted_news += f"DESCRIPTION: {article['description']}\n"
+        formatted_news += "=" * 60 + "\n\n"
     
     return formatted_news
 
-def check_gnews_api_status():
-    """Check if GNews API is accessible"""
-    if not GNEWS_API_KEY:
-        return False, "GNews API key not configured"
-    
-    try:
-        # Test with a simple query
-        url = "https://gnews.io/api/v4/search"
-        params = {
-            "q": "test",
-            "lang": "en",
-            "max": 1,
-            "apikey": GNEWS_API_KEY
-        }
-        response = requests.get(url, params=params, timeout=5)
-        
-        if response.status_code == 200:
-            return True, "API accessible"
-        elif response.status_code == 401:
-            return False, "Invalid API key"
-        elif response.status_code == 429:
-            return False, "API rate limit exceeded"
-        else:
-            return False, f"API error: {response.status_code}"
-    except Exception as e:
-        return False, f"Connection error: {str(e)}"
-
 def is_crime_or_safety_related(message):
-    """Check if the user's message is related to crime or safety (local or global)"""
+    """Check if the user's message is related to crime or safety"""
     message_lower = message.lower()
     
     crime_safety_keywords = [
@@ -416,45 +441,59 @@ def is_crime_or_safety_related(message):
         'attack', 'mugging', 'fraud', 'scam', 'harassment', 'domestic violence',
         'kidnapping', 'rape', 'sexual assault', 'stalking', 'threats',
         'crime rate', 'crime statistics', 'police report', 'incident',
-        'law enforcement', 'criminal activity', 'public safety'
+        'law enforcement', 'criminal activity', 'public safety', 'neighborhood',
+        'area', 'location', 'here', 'near', 'around'
     ]
     
-    location_indicators = [
-        'here', 'near me', 'nearby', 'in this area', 'around here',
-        'in my area', 'my location', 'this location', 'this place',
-        'where i am', 'my neighborhood', 'this neighborhood',
-        # Global location indicators
-        'in ', 'from ', 'about ', 'worldwide', 'globally', 'international',
-        'around the world', 'other countries', 'world crime'
-    ]
-    
-    # Check if message contains crime/safety keywords
-    has_crime_keywords = any(keyword in message_lower for keyword in crime_safety_keywords)
-    
-    # Check if message has any location context (local or global)
-    has_location_context = any(indicator in message_lower for indicator in location_indicators)
-    
-    return has_crime_keywords or has_location_context
+    return any(keyword in message_lower for keyword in crime_safety_keywords)
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    data = request.get_json()
-    message = data.get("message")
-    lat = data.get("lat")
-    lng = data.get("lng")
-
-    if not message or lat is None or lng is None:
-        return jsonify({"error": "Message, latitude, and longitude are required"}), 400
-
     try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        message = data.get("message")
+        lat = data.get("lat")
+        lng = data.get("lng")
+
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+            
+        if lat is None or lng is None:
+            return jsonify({"error": "Location coordinates are required"}), 400
+
+        # Get session ID
+        session_id = get_or_create_session_id()
+        
+        # Get location name
         location = reverse_geocode(lat, lng)
         
+        # Check if query is crime/safety related
         if not is_crime_or_safety_related(message):
-            return jsonify({"response": "I'm sorry, I can only answer questions related to crime and safety in your area. Please ask about local crime statistics, safety concerns, or security issues."}), 200
+            response_text = "I'm sorry, I can only answer questions related to crime and safety in your area. Please ask about local crime statistics, safety concerns, or security issues."
+            add_to_conversation_history(session_id, message, response_text, location)
+            return jsonify({"response": response_text})
+        
+        # Check for global queries
+        is_global, global_location = is_global_crime_query(message)
         
         # Get crime and safety related news
-        crime_articles = fetch_crime_news(location)
+        if is_global and global_location:
+            crime_articles = fetch_crime_news(global_query=global_location)
+        else:
+            crime_articles = fetch_crime_news(location)
+            
         formatted_articles = format_news_for_ai(crime_articles)
+
+        # Get conversation history
+        history = get_conversation_history(session_id)
+        conversation_context = ""
+        if history:
+            conversation_context = "Previous conversation context:\n"
+            for conv in history[-3:]:  # Last 3 exchanges
+                conversation_context += f"User: {conv['user_message']}\nBot: {conv['bot_response']}\n\n"
 
         system_prompt = f"""
 You are a specialized safety and crime information chatbot for location-aware services. You do not specialize in any specific location around the world. You can provide information from around the world, information from every country to users.
@@ -470,7 +509,7 @@ Your role is to provide information ONLY about:
 - Safety ratings and concerns
 
 Recent crime and safety news for {location}:
-{formatted_articles}
+{crime_articles}
 
 Always reference the specific location ({location}) in your responses when relevant.
 Provide helpful, accurate, and location-specific crime and safety information.
@@ -481,128 +520,140 @@ Don't use too many buzzwords - make it sound human.
 Be polite to the user.
 """
 
+        # Prepare messages for OpenAI
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add recent conversation history
+        for conv in history[-2:]:  # Last 2 exchanges for context
+            messages.append({"role": "user", "content": conv['user_message']})
+            messages.append({"role": "assistant", "content": conv['bot_response']})
+            
+        # Add current message
+        messages.append({"role": "user", "content": message})
+
+        # Get AI response
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message}
-            ],
-            max_tokens=150,
-            temperature=0.7
+            messages=messages,
+            max_tokens=200,
+            temperature=0.7,
+            timeout=15
         )
 
-        reply = response.choices[0].message.content
+        reply = response.choices[0].message.content.strip()
+        
+        # Store in conversation history
+        add_to_conversation_history(session_id, message, reply, location)
+        
         return jsonify({"response": reply})
 
+    except requests.exceptions.RequestException as e:
+        print(f"Network error in chat: {str(e)}")
+        return jsonify({"response": "I'm having trouble connecting to my data sources right now. Please try again in a moment."}), 500
+        
     except Exception as e:
-        print("Error processing chat request:", str(e))
-        return jsonify({"response": "Sorry, something went wrong. Try again later."}), 500
+        print(f"Error processing chat request: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({"response": "Sorry, I encountered an error. Please try rephrasing your question or try again later."}), 500
 
 @app.route("/api/places/search", methods=["POST"])
 def search_places():
     """Search for places using Google Places API"""
-    data = request.get_json()
-    query = data.get("query")
-    lat = data.get("lat")
-    lng = data.get("lng")
-    
-    if not query:
-        return jsonify({"error": "Query is required"}), 400
-    
     try:
-        places = search_nearby_places(lat or 0, lng or 0, query)
+        data = request.get_json()
+        query = data.get("query")
+        lat = data.get("lat", 0)
+        lng = data.get("lng", 0)
+        
+        if not query:
+            return jsonify({"error": "Query is required"}), 400
+        
+        places = search_nearby_places(lat, lng, query)
         return jsonify({"places": places})
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Places search error: {str(e)}")
+        return jsonify({"error": "Failed to search places"}), 500
 
 @app.route("/api/places/details", methods=["POST"])
 def place_details():
     """Get place details using Google Places API"""
-    data = request.get_json()
-    place_id = data.get("place_id")
-    
-    if not place_id:
-        return jsonify({"error": "Place ID is required"}), 400
-    
     try:
+        data = request.get_json()
+        place_id = data.get("place_id")
+        
+        if not place_id:
+            return jsonify({"error": "Place ID is required"}), 400
+        
         details = get_place_details(place_id)
         if details:
             return jsonify({"place": details})
         else:
             return jsonify({"error": "Place not found"}), 404
+            
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Place details error: {str(e)}")
+        return jsonify({"error": "Failed to get place details"}), 500
 
 @app.route("/api/directions", methods=["POST"])
 def directions():
     """Get directions using Google Directions API"""
-    data = request.get_json()
-    origin = data.get("origin")
-    destination = data.get("destination")
-    mode = data.get("mode", "driving")
-    
-    if not origin or not destination:
-        return jsonify({"error": "Origin and destination are required"}), 400
-    
     try:
+        data = request.get_json()
+        origin = data.get("origin")
+        destination = data.get("destination")
+        mode = data.get("mode", "driving")
+        
+        if not origin or not destination:
+            return jsonify({"error": "Origin and destination are required"}), 400
+        
         directions_result = get_directions(origin, destination, mode)
         if directions_result:
             return jsonify(directions_result)
         else:
             return jsonify({"error": "Directions not found"}), 404
+            
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Directions error: {str(e)}")
+        return jsonify({"error": "Failed to get directions"}), 500
 
-@app.route("/api/routes", methods=["POST"])
-def routes():
-    """Get routes using Google Routes API"""
-    data = request.get_json()
-    origin = data.get("origin")
-    destination = data.get("destination")
-    travel_mode = data.get("travel_mode", "DRIVE")
-    
-    if not origin or not destination:
-        return jsonify({"error": "Origin and destination are required"}), 400
-    
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    """Health check endpoint"""
     try:
-        routes_result = get_routes(origin, destination, travel_mode)
-        if routes_result:
-            return jsonify(routes_result)
-        else:
-            return jsonify({"error": "Routes not found"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/news-status", methods=["GET"])
-def news_status():
-    try:
-        accessible, status = check_gnews_api_status()
+        # Check if critical services are configured
+        services = {
+            "openai": bool(client.api_key),
+            "gnews": bool(GNEWS_API_KEY),
+            "maps": bool(MAPS_API_KEY),
+            "places": bool(PLACES_API_KEY),
+        }
+        
         return jsonify({
-            "accessible": accessible,
-            "status": status,
-            "api_key_configured": bool(GNEWS_API_KEY)
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "services": services,
+            "cache_size": len(api_cache)
         })
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/test-news", methods=["POST"])
-def test_news():
-    try:
-        data = request.get_json()
-        location = data.get("location", "test location")
-        articles = fetch_crime_news(location)
-        formatted = format_news_for_ai(articles)
         return jsonify({
-            "location": location,
-            "articles_found": len(articles),
-            "formatted_news": formatted,
-            "raw_articles": articles
-        })
+            "status": "error",
+            "error": str(e)
+        }), 500
+
+@app.route("/api/clear-cache", methods=["POST"])
+def clear_cache():
+    """Clear API cache"""
+    try:
+        api_cache.clear()
+        return jsonify({"message": "Cache cleared successfully"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/clear-history", methods=["POST"])
 def clear_history():
+    """Clear conversation history"""
     try:
         session_id = session.get('session_id')
         if session_id and session_id in conversation_history:
@@ -613,30 +664,63 @@ def clear_history():
 
 @app.route("/")
 def serve_index():
-    # Read the HTML file and inject all API keys
+    """Serve the main application page with injected API keys"""
     try:
-        with open(os.path.join(app.static_folder, 'index.html'), 'r', encoding='utf-8') as f:
-            html_content = f.read()
+        # Try to read from static folder
+        static_path = os.path.join(app.static_folder or 'frontend', 'index.html')
         
-        # Replace all API key placeholders with actual keys from environment
+        if os.path.exists(static_path):
+            with open(static_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+        else:
+            # Fallback: try current directory
+            with open('index.html', 'r', encoding='utf-8') as f:
+                html_content = f.read()
+        
+        # Replace API key placeholders with actual keys
         replacements = {
-            "const GOOGLE_MAPS_API_KEY = 'MAPS_JAVASCRIPT_KEY';": f"const GOOGLE_MAPS_API_KEY = '{MAPS_API_KEY or ''}';",
-            "const PLACES_API_KEY = 'PLACES_API_KEY';": f"const PLACES_API_KEY = '{PLACES_API_KEY or ''}';",
-            "const DIRECTIONS_API_KEY = 'DIRECTIONS_API_KEY';": f"const DIRECTIONS_API_KEY = '{DIRECTIONS_API_KEY or ''}';",
-            "const ROUTES_API_KEY = 'ROUTES_API_KEY';": f"const ROUTES_API_KEY = '{ROUTES_API_KEY or ''}';"
+            "const GOOGLE_MAPS_API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY';": f"const GOOGLE_MAPS_API_KEY = '{MAPS_API_KEY or ''}';",
+            "const PLACES_API_KEY = 'YOUR_PLACES_API_KEY';": f"const PLACES_API_KEY = '{PLACES_API_KEY or ''}';",
+            "const DIRECTIONS_API_KEY = 'YOUR_DIRECTIONS_API_KEY';": f"const DIRECTIONS_API_KEY = '{DIRECTIONS_API_KEY or ''}';",
+            "const ROUTES_API_KEY = 'YOUR_ROUTES_API_KEY';": f"const ROUTES_API_KEY = '{ROUTES_API_KEY or ''}';",
         }
         
         for placeholder, replacement in replacements.items():
             html_content = html_content.replace(placeholder, replacement)
         
         return render_template_string(html_content)
+        
+    except FileNotFoundError:
+        return jsonify({
+            "error": "index.html not found", 
+            "help": "Make sure index.html is in the frontend folder or current directory"
+        }), 404
     except Exception as e:
         print(f"Error serving index: {e}")
-        return send_from_directory(app.static_folder, "index.html")
+        return jsonify({"error": "Failed to serve application"}), 500
 
 @app.route("/<path:path>")
 def serve_static(path):
-    return send_from_directory(app.static_folder, path)
+    """Serve static files"""
+    try:
+        return send_from_directory(app.static_folder or 'frontend', path)
+    except:
+        return jsonify({"error": "File not found"}), 404
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    print("SafePath Backend Starting...")
+    print(f"OpenAI API Key: {'✓' if client.api_key else '✗'}")
+    print(f"GNews API Key: {'✓' if GNEWS_API_KEY else '✗'}")
+    print(f"Google Maps API Key: {'✓' if MAPS_API_KEY else '✗'}")
+    print(f"Places API Key: {'✓' if PLACES_API_KEY else '✗'}")
+    
+    app.run(host='0.0.0.0', port=5000, debug=True)
