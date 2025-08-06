@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory, session, render_template_string
 from flask_cors import CORS
 import requests
 import os
@@ -16,6 +16,7 @@ CORS(app, supports_credentials=True)
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY")
+MAPS_API_KEY = os.getenv("MAPS_JAVASCRIPT_KEY")  # Add this line
 
 # Store conversation history (in production, use Redis or database)
 conversation_history = {}
@@ -356,7 +357,9 @@ Always reference the specific location ({location}) in your responses when relev
 Provide helpful, accurate, and location-specific crime and safety information.
 If you don't have specific crime data about their exact location, acknowledge this and provide general safety guidance for similar areas.
 Keep responses focused strictly on crime and safety topics.
-Keep your responses short - always make sure they're under 150 words.
+Keep your responses short - always make sure they're under 100 words.
+Don't use too many buzzwords - make it sound human.
+Be polite to the user.
 """
 
         response = client.chat.completions.create(
@@ -416,7 +419,21 @@ def clear_history():
 
 @app.route("/")
 def serve_index():
-    return send_from_directory(app.static_folder, "index.html")
+    # Read the HTML file and inject the API key
+    try:
+        with open(os.path.join(app.static_folder, 'index.html'), 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Replace the placeholder API key with the actual key from environment
+        html_content = html_content.replace(
+            "const GOOGLE_MAPS_API_KEY = 'MAPS_JAVASCRIPT_KEY';",
+            f"const GOOGLE_MAPS_API_KEY = '{MAPS_API_KEY or ''}';"
+        )
+        
+        return render_template_string(html_content)
+    except Exception as e:
+        print(f"Error serving index: {e}")
+        return send_from_directory(app.static_folder, "index.html")
 
 @app.route("/<path:path>")
 def serve_static(path):
