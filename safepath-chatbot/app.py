@@ -10,6 +10,7 @@ import json
 import traceback
 import time
 import re
+import math
 
 load_dotenv()
 
@@ -25,8 +26,9 @@ PLACES_API_KEY = os.getenv("PLACES_KEY")
 DIRECTIONS_API_KEY = os.getenv("DIRECTIONS_KEY")
 ROUTES_API_KEY = os.getenv("ROUTES_KEY")
 
-# Store conversation history (in production, use Redis or database)
+# Store conversation history and plotted points (in production, use Redis or database)
 conversation_history = {}
+user_plotted_points = {}
 
 # Cache for API responses to improve performance
 api_cache = {}
@@ -43,6 +45,71 @@ def get_conversation_history(session_id):
     if session_id not in conversation_history:
         conversation_history[session_id] = []
     return conversation_history[session_id]
+
+def get_user_plotted_points(session_id):
+    """Get plotted points for a session"""
+    if session_id not in user_plotted_points:
+        user_plotted_points[session_id] = []
+    return user_plotted_points[session_id]
+
+def add_plotted_point(session_id, point_data):
+    """Add a plotted point to user's session"""
+    if session_id not in user_plotted_points:
+        user_plotted_points[session_id] = []
+    
+    point = {
+        "id": point_data.get("id", len(user_plotted_points[session_id]) + 1),
+        "lat": float(point_data["lat"]),
+        "lng": float(point_data["lng"]),
+        "name": point_data.get("name", f"Point {len(user_plotted_points[session_id]) + 1}"),
+        "timestamp": datetime.now().isoformat(),
+        "address": point_data.get("address", ""),
+        "notes": point_data.get("notes", "")
+    }
+    
+    user_plotted_points[session_id].append(point)
+    return point
+
+def remove_plotted_point(session_id, point_id):
+    """Remove a plotted point from user's session"""
+    if session_id not in user_plotted_points:
+        return False
+    
+    user_plotted_points[session_id] = [
+        p for p in user_plotted_points[session_id] if p["id"] != point_id
+    ]
+    return True
+
+def calculate_distance_between_points(lat1, lng1, lat2, lng2):
+    """Calculate distance between two points using Haversine formula"""
+    # Convert latitude and longitude from degrees to radians
+    lat1, lng1, lat2, lng2 = map(math.radians, [lat1, lng1, lat2, lng2])
+    
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    # Radius of earth in kilometers
+    r = 6371
+    
+    return c * r
+
+def calculate_total_route_distance(points):
+    """Calculate total distance for a route through multiple points"""
+    if len(points) < 2:
+        return 0
+    
+    total_distance = 0
+    for i in range(len(points) - 1):
+        distance = calculate_distance_between_points(
+            points[i]["lat"], points[i]["lng"],
+            points[i + 1]["lat"], points[i + 1]["lng"]
+        )
+        total_distance += distance
+    
+    return total_distance
 
 def add_to_conversation_history(session_id, user_message, bot_response, location):
     """Add a message pair to conversation history"""
@@ -116,6 +183,49 @@ def geocode_place(place_name):
     except Exception as e:
         print(f"Geocoding error: {e}")
         return None
+
+def get_place_suggestions(query, location=None):
+    """Get place suggestions using Google Places Autocomplete API"""
+    if not PLACES_API_KEY:
+        return []
+    
+    cache_key = f"suggestions_{query}_{location}"
+    cached_result = get_from_cache(cache_key)
+    if cached_result:
+        return cached_result
+    
+    try:
+        url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        params = {
+            'input': query,
+            'key': PLACES_API_KEY,
+            'types': 'establishment',
+            'components': 'country:us'
+        }
+        
+        if location:
+            params['location'] = f"{location['lat']},{location['lng']}"
+            params['radius'] = 50000
+        
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'OK':
+                suggestions = []
+                for prediction in data.get('predictions', []):
+                    suggestions.append({
+                        'place_id': prediction['place_id'],
+                        'description': prediction['description'],
+                        'main_text': prediction['structured_formatting']['main_text'],
+                        'secondary_text': prediction['structured_formatting'].get('secondary_text', ''),
+                        'types': prediction.get('types', [])
+                    })
+                set_cache(cache_key, suggestions)
+                return suggestions
+        return []
+    except Exception as e:
+        print(f"Places suggestions error: {e}")
+        return []
 
 def detect_location_intent(message):
     """Detect if the user wants to navigate to a specific location using NLP patterns"""
@@ -557,7 +667,8 @@ def is_crime_or_safety_related(message):
         'crime rate', 'crime statistics', 'police report', 'incident',
         'law enforcement', 'criminal activity', 'public safety', 'neighborhood',
         'area', 'location', 'here', 'near', 'around', 'show me', 'take me to',
-        'go to', 'navigate to', 'find', 'locate', 'where is', 'directions'
+        'go to', 'navigate to', 'find', 'locate', 'where is', 'directions',
+        'plot', 'point', 'marker', 'route', 'distance', 'path'
     ]
     
     return any(keyword in message_lower for keyword in crime_safety_keywords)
@@ -642,8 +753,20 @@ def chat():
             
         formatted_articles = format_news_for_ai(crime_articles)
 
-        # Get conversation history
+        # Get conversation history and plotted points
         history = get_conversation_history(session_id)
+        plotted_points = get_user_plotted_points(session_id)
+        
+        # Include plotted points context
+        plotted_points_context = ""
+        if plotted_points:
+            plotted_points_context = f"\n\nUser's plotted points ({len(plotted_points)} points):\n"
+            total_distance = calculate_total_route_distance(plotted_points)
+            plotted_points_context += f"Total route distance: {total_distance:.2f} km\n"
+            
+            for i, point in enumerate(plotted_points, 1):
+                plotted_points_context += f"{i}. {point['name']} at ({point['lat']:.4f}, {point['lng']:.4f}) - {point['timestamp'][:16]}\n"
+
         conversation_context = ""
         if history:
             conversation_context = "Previous conversation context:\n"
@@ -662,9 +785,12 @@ Your role is to provide information ONLY about:
 - Violence, theft, assault, burglary, and other criminal activities
 - Police presence and law enforcement updates
 - Safety ratings and concerns
+- Help with plotting points and route planning for safety purposes
 
 Recent crime and safety news for {location}:
-{crime_articles}
+{formatted_articles}
+
+{plotted_points_context}
 
 Always reference the specific location ({location}) in your responses when relevant.
 Provide helpful, accurate, and location-specific crime and safety information.
@@ -673,6 +799,8 @@ Keep responses focused strictly on crime and safety topics.
 Keep your responses short - always make sure they're under 100 words.
 Don't use too many buzzwords - make it sound human.
 Be polite to the user.
+
+If the user asks about their plotted points, routes, or distances, use the plotted points context provided above.
 """
 
         # Prepare messages for OpenAI
@@ -710,6 +838,143 @@ Be polite to the user.
         print(f"Error processing chat request: {str(e)}")
         print(traceback.format_exc())
         return jsonify({"response": "Sorry, I encountered an error. Please try rephrasing your question or try again later."}), 500
+
+@app.route("/api/plot-point", methods=["POST"])
+def plot_point():
+    """Add a point to user's plotted points"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        lat = data.get("lat")
+        lng = data.get("lng")
+        name = data.get("name", "")
+        address = data.get("address", "")
+        notes = data.get("notes", "")
+        
+        if lat is None or lng is None:
+            return jsonify({"error": "Latitude and longitude are required"}), 400
+        
+        session_id = get_or_create_session_id()
+        
+        point_data = {
+            "lat": lat,
+            "lng": lng,
+            "name": name or f"Point {len(get_user_plotted_points(session_id)) + 1}",
+            "address": address,
+            "notes": notes
+        }
+        
+        point = add_plotted_point(session_id, point_data)
+        
+        # Calculate new total distance
+        points = get_user_plotted_points(session_id)
+        total_distance = calculate_total_route_distance(points)
+        
+        return jsonify({
+            "success": True,
+            "point": point,
+            "total_points": len(points),
+            "total_distance_km": round(total_distance, 2)
+        })
+        
+    except Exception as e:
+        print(f"Error plotting point: {str(e)}")
+        return jsonify({"error": "Failed to plot point"}), 500
+
+@app.route("/api/remove-point", methods=["POST"])
+def remove_point():
+    """Remove a point from user's plotted points"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        point_id = data.get("point_id")
+        if point_id is None:
+            return jsonify({"error": "Point ID is required"}), 400
+        
+        session_id = get_or_create_session_id()
+        
+        success = remove_plotted_point(session_id, point_id)
+        
+        if success:
+            # Calculate new total distance
+            points = get_user_plotted_points(session_id)
+            total_distance = calculate_total_route_distance(points)
+            
+            return jsonify({
+                "success": True,
+                "total_points": len(points),
+                "total_distance_km": round(total_distance, 2)
+            })
+        else:
+            return jsonify({"error": "Point not found"}), 404
+            
+    except Exception as e:
+        print(f"Error removing point: {str(e)}")
+        return jsonify({"error": "Failed to remove point"}), 500
+
+@app.route("/api/get-plotted-points", methods=["GET"])
+def get_plotted_points():
+    """Get all plotted points for the current session"""
+    try:
+        session_id = get_or_create_session_id()
+        points = get_user_plotted_points(session_id)
+        total_distance = calculate_total_route_distance(points)
+        
+        return jsonify({
+            "points": points,
+            "total_points": len(points),
+            "total_distance_km": round(total_distance, 2)
+        })
+        
+    except Exception as e:
+        print(f"Error getting plotted points: {str(e)}")
+        return jsonify({"error": "Failed to get plotted points"}), 500
+
+@app.route("/api/clear-plotted-points", methods=["POST"])
+def clear_plotted_points():
+    """Clear all plotted points for the current session"""
+    try:
+        session_id = get_or_create_session_id()
+        
+        if session_id in user_plotted_points:
+            user_plotted_points[session_id] = []
+        
+        return jsonify({
+            "success": True,
+            "total_points": 0,
+            "total_distance_km": 0
+        })
+        
+    except Exception as e:
+        print(f"Error clearing plotted points: {str(e)}")
+        return jsonify({"error": "Failed to clear plotted points"}), 500
+
+@app.route("/api/places/suggestions", methods=["POST"])
+def places_suggestions():
+    """Get place suggestions for autocomplete"""
+    try:
+        data = request.get_json()
+        query = data.get("query", "")
+        lat = data.get("lat")
+        lng = data.get("lng")
+        
+        if not query or len(query) < 2:
+            return jsonify({"suggestions": []})
+        
+        location = None
+        if lat is not None and lng is not None:
+            location = {"lat": lat, "lng": lng}
+        
+        suggestions = get_place_suggestions(query, location)
+        return jsonify({"suggestions": suggestions})
+        
+    except Exception as e:
+        print(f"Places suggestions error: {str(e)}")
+        return jsonify({"error": "Failed to get suggestions"}), 500
 
 @app.route("/api/places/search", methods=["POST"])
 def search_places():
@@ -772,6 +1037,27 @@ def directions():
         print(f"Directions error: {str(e)}")
         return jsonify({"error": "Failed to get directions"}), 500
 
+@app.route("/api/calculate-route-distance", methods=["POST"])
+def calculate_route_distance():
+    """Calculate total distance for a route through multiple points"""
+    try:
+        data = request.get_json()
+        points = data.get("points", [])
+        
+        if len(points) < 2:
+            return jsonify({"distance_km": 0, "message": "Need at least 2 points"})
+        
+        total_distance = calculate_total_route_distance(points)
+        
+        return jsonify({
+            "distance_km": round(total_distance, 2),
+            "total_points": len(points)
+        })
+        
+    except Exception as e:
+        print(f"Distance calculation error: {str(e)}")
+        return jsonify({"error": "Failed to calculate distance"}), 500
+
 @app.route("/api/health", methods=["GET"])
 def health_check():
     """Health check endpoint"""
@@ -788,7 +1074,9 @@ def health_check():
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
             "services": services,
-            "cache_size": len(api_cache)
+            "cache_size": len(api_cache),
+            "active_sessions": len(conversation_history),
+            "total_plotted_points": sum(len(points) for points in user_plotted_points.values())
         })
         
     except Exception as e:
@@ -816,6 +1104,26 @@ def clear_history():
         return jsonify({"message": "Conversation history cleared"})
     except Exception as e:
         return jsonify({"error": "Failed to clear history"}), 500
+
+@app.route("/api/session-stats", methods=["GET"])
+def session_stats():
+    """Get session statistics"""
+    try:
+        session_id = get_or_create_session_id()
+        history = get_conversation_history(session_id)
+        points = get_user_plotted_points(session_id)
+        total_distance = calculate_total_route_distance(points)
+        
+        return jsonify({
+            "session_id": session_id,
+            "conversation_count": len(history),
+            "plotted_points": len(points),
+            "total_distance_km": round(total_distance, 2),
+            "session_created": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/")
 def serve_index():

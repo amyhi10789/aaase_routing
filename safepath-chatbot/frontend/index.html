@@ -330,6 +330,7 @@
       align-items: center;
       min-width: 300px;
       max-width: 400px;
+      position: relative;
     }
 
     #places-search {
@@ -345,6 +346,58 @@
     .search-icon {
       color: #666;
       margin-right: 8px;
+    }
+
+    /* Search suggestions dropdown */
+    .search-suggestions {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      max-height: 300px;
+      overflow-y: auto;
+      z-index: 1001;
+      display: none;
+    }
+
+    .search-suggestion-item {
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+      display: flex;
+      align-items: center;
+    }
+
+    .search-suggestion-item:hover {
+      background-color: rgba(66, 133, 244, 0.1);
+    }
+
+    .search-suggestion-item:last-child {
+      border-bottom: none;
+    }
+
+    .suggestion-icon {
+      margin-right: 10px;
+      color: #666;
+    }
+
+    .suggestion-text {
+      flex: 1;
+    }
+
+    .suggestion-main {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .suggestion-secondary {
+      font-size: 12px;
+      color: #666;
+      margin-top: 2px;
     }
 
     /* Directions panel */
@@ -399,6 +452,115 @@
       border-color: #4285f4;
     }
 
+    /* Plot Point Panel */
+    #plot-point-panel {
+      position: fixed;
+      top: 130px;
+      right: 25px;
+      width: 280px;
+      max-height: 500px;
+      background-color: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      display: none;
+      overflow-y: auto;
+      z-index: 1000;
+    }
+
+    #plot-point-panel h3 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .plot-close {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      color: #666;
+    }
+
+    .plot-button {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      background: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+
+    .plot-button:hover {
+      background: #3367d6;
+    }
+
+    .plot-button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .plotted-points-list {
+      margin-top: 16px;
+    }
+
+    .plotted-point-item {
+      padding: 8px;
+      margin: 4px 0;
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 6px;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .plotted-point-info {
+      flex: 1;
+    }
+
+    .plotted-point-name {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .plotted-point-coords {
+      color: #666;
+      font-size: 11px;
+    }
+
+    .remove-point {
+      background: #ff4444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .remove-point:hover {
+      background: #cc0000;
+    }
+
+    .total-distance {
+      margin-top: 12px;
+      padding: 8px;
+      background: rgba(76, 175, 80, 0.1);
+      border-radius: 6px;
+      text-align: center;
+      font-weight: 500;
+      color: #2e7d32;
+    }
+
     .error-message {
       color: #ff6b6b;
       font-size: 12px;
@@ -424,6 +586,27 @@
         opacity: 1;
       }
     }
+
+    /* Click to plot indicator */
+    .click-to-plot-indicator {
+      position: fixed;
+      bottom: 120px;
+      right: 20px;
+      background: rgba(66, 133, 244, 0.9);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      z-index: 1000;
+      display: none;
+      animation: fadeInOut 2s ease-in-out infinite;
+    }
+
+    @keyframes fadeInOut {
+      0%, 100% { opacity: 0.7; }
+      50% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
@@ -440,11 +623,41 @@
   <div id="map"></div>
   <div id="map-overlay"></div>
 
+  <!-- Click to plot indicator -->
+  <div id="click-to-plot-indicator" class="click-to-plot-indicator">
+    Click anywhere on the map to plot a point
+  </div>
+
   <!-- Directions Panel -->
   <div id="directions-panel">
     <div class="directions-close" onclick="closeDirections()">&times;</div>
     <h3>Directions</h3>
     <div id="directions-content"></div>
+  </div>
+
+  <!-- Plot Point Panel -->
+  <div id="plot-point-panel">
+    <div class="plot-close" onclick="closePlotPanel()">&times;</div>
+    <h3>Point Plotter</h3>
+    <div id="plot-current-location">
+      <p id="current-location-info">Click on the map to select a location</p>
+      <button id="plot-point-btn" class="plot-button" disabled onclick="plotCurrentPoint()">
+        📍 Plot This Point
+      </button>
+      <button id="connect-points" class="plot-button" onclick="connectAllPoints()">
+        🔗 Connect Points with Routes
+      </button>
+      <button id="clear-all-points" class="plot-button" onclick="clearAllPlottedPoints()">
+        🗑️ Clear All Points
+      </button>
+    </div>
+    <div class="plotted-points-list">
+      <h4 style="margin: 16px 0 8px 0; font-size: 14px; color: #333;">Plotted Points:</h4>
+      <div id="plotted-points-container"></div>
+      <div id="total-distance-display" class="total-distance" style="display: none;">
+        Total Distance: <span id="total-distance-value">0 km</span>
+      </div>
+    </div>
   </div>
 
   <!-- Chatbot Popup -->
@@ -478,6 +691,14 @@
     let infoWindow;
     let loadingTimeout;
     let destinationMarkers = []; // Store destination markers
+    
+    // Point plotting variables
+    let plottedPoints = [];
+    let plottedMarkers = [];
+    let routePolylines = [];
+    let selectedLocation = null;
+    let isPlottingMode = false;
+    let totalDistance = 0;
     
     const popup = document.getElementById('crime-popup');
     const input = document.getElementById('chat-input');
@@ -551,7 +772,7 @@
         <div style="max-width: 250px; font-family: 'Segoe UI', sans-serif;">
           <h3 style="margin: 0 0 8px 0; color: #333;">${title || 'Location'}</h3>
           <p style="margin: 0 0 12px 0; font-size: 13px; color: #666;">${address}</p>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             <button onclick="getDirectionsToLocation({lat: ${location.lat}, lng: ${location.lng}}, '${title || 'Location'}')" 
                     style="background: #4285f4; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
               Get Directions
@@ -559,6 +780,10 @@
             <button onclick="centerMapOnLocation({lat: ${location.lat}, lng: ${location.lng}})" 
                     style="background: #34a853; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
               Center Map
+            </button>
+            <button onclick="selectLocationForPlotting({lat: ${location.lat}, lng: ${location.lng}}, '${title || 'Location'}')" 
+                    style="background: #ff9800; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+              Select for Plotting
             </button>
           </div>
         </div>
@@ -584,6 +809,13 @@
         map.setCenter(location);
         map.setZoom(16);
       }
+    }
+
+    // Select location for plotting
+    function selectLocationForPlotting(location, name) {
+      selectedLocation = { ...location, name: name || 'Selected Location' };
+      updatePlotPanel();
+      showPlotPanel();
     }
 
     // Get directions to a specific location
@@ -629,6 +861,270 @@
       );
       
       console.log('Navigated to:', formatted_address);
+    }
+
+    // Point plotting functions
+    function showPlotPanel() {
+      document.getElementById('plot-point-panel').style.display = 'block';
+    }
+
+    function closePlotPanel() {
+      document.getElementById('plot-point-panel').style.display = 'none';
+      selectedLocation = null;
+      updatePlotPanel();
+    }
+
+    function updatePlotPanel() {
+      const locationInfo = document.getElementById('current-location-info');
+      const plotButton = document.getElementById('plot-point-btn');
+      
+      if (selectedLocation) {
+        locationInfo.innerHTML = `
+          <strong>${selectedLocation.name}</strong><br>
+          <small>Lat: ${selectedLocation.lat.toFixed(6)}, Lng: ${selectedLocation.lng.toFixed(6)}</small>
+        `;
+        plotButton.disabled = false;
+      } else {
+        locationInfo.textContent = 'Click on the map to select a location';
+        plotButton.disabled = true;
+      }
+      
+      updatePlottedPointsList();
+    }
+
+    function plotCurrentPoint() {
+      if (!selectedLocation) return;
+      
+      const pointId = Date.now();
+      const point = {
+        id: pointId,
+        lat: selectedLocation.lat,
+        lng: selectedLocation.lng,
+        name: selectedLocation.name || `Point ${plottedPoints.length + 1}`,
+        timestamp: new Date().toLocaleTimeString()
+      };
+      
+      plottedPoints.push(point);
+      
+      // Create marker
+      const marker = new google.maps.Marker({
+        position: { lat: point.lat, lng: point.lng },
+        map: map,
+        title: point.name,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: "#FF6B35",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 3,
+        },
+        animation: google.maps.Animation.DROP,
+        zIndex: 999
+      });
+
+      // Add click listener to marker
+      marker.addListener('click', () => {
+        showPointInfoWindow(marker, point);
+      });
+      
+      plottedMarkers.push({ marker, point });
+      
+      // Clear selection
+      selectedLocation = null;
+      updatePlotPanel();
+      
+      // Auto-connect if more than one point
+      if (plottedPoints.length > 1) {
+        setTimeout(connectAllPoints, 500);
+      }
+      
+      console.log(`Plotted point: ${point.name} at ${point.lat}, ${point.lng}`);
+    }
+
+    function showPointInfoWindow(marker, point) {
+      const content = `
+        <div style="font-family: 'Segoe UI', sans-serif;">
+          <h4 style="margin: 0 0 8px 0; color: #333;">${point.name}</h4>
+          <p style="margin: 0 0 8px 0; font-size: 13px; color: #666;">
+            Plotted at ${point.timestamp}<br>
+            Lat: ${point.lat.toFixed(6)}, Lng: ${point.lng.toFixed(6)}
+          </p>
+          <button onclick="removePointById(${point.id})" 
+                  style="background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+            Remove Point
+          </button>
+        </div>
+      `;
+      
+      if (infoWindow) {
+        infoWindow.setContent(content);
+        infoWindow.open(map, marker);
+      }
+    }
+
+    function removePointById(pointId) {
+      const pointIndex = plottedPoints.findIndex(p => p.id === pointId);
+      if (pointIndex === -1) return;
+      
+      // Remove marker
+      const markerData = plottedMarkers.find(m => m.point.id === pointId);
+      if (markerData) {
+        markerData.marker.setMap(null);
+      }
+      
+      // Remove from arrays
+      plottedPoints.splice(pointIndex, 1);
+      plottedMarkers = plottedMarkers.filter(m => m.point.id !== pointId);
+      
+      // Close info window
+      if (infoWindow) {
+        infoWindow.close();
+      }
+      
+      // Reconnect remaining points
+      clearRoutePolylines();
+      if (plottedPoints.length > 1) {
+        connectAllPoints();
+      } else {
+        totalDistance = 0;
+        updateDistanceDisplay();
+      }
+      
+      updatePlottedPointsList();
+    }
+
+    function clearAllPlottedPoints() {
+      // Clear markers
+      plottedMarkers.forEach(markerData => {
+        markerData.marker.setMap(null);
+      });
+      
+      // Clear routes
+      clearRoutePolylines();
+      
+      // Reset arrays
+      plottedPoints = [];
+      plottedMarkers = [];
+      totalDistance = 0;
+      
+      // Close info window
+      if (infoWindow) {
+        infoWindow.close();
+      }
+      
+      updatePlottedPointsList();
+      updateDistanceDisplay();
+    }
+
+    function clearRoutePolylines() {
+      routePolylines.forEach(polyline => {
+        polyline.setMap(null);
+      });
+      routePolylines = [];
+    }
+
+    function connectAllPoints() {
+      if (plottedPoints.length < 2) return;
+      
+      // Clear existing routes
+      clearRoutePolylines();
+      totalDistance = 0;
+      
+      // Connect consecutive points
+      for (let i = 0; i < plottedPoints.length - 1; i++) {
+        const origin = plottedPoints[i];
+        const destination = plottedPoints[i + 1];
+        
+        calculateAndDisplayRoute(origin, destination, i);
+      }
+    }
+
+    function calculateAndDisplayRoute(origin, destination, routeIndex) {
+      if (!directionsService) return;
+      
+      const colors = ['#FF6B35', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+      const color = colors[routeIndex % colors.length];
+      
+      directionsService.route({
+        origin: { lat: origin.lat, lng: origin.lng },
+        destination: { lat: destination.lat, lng: destination.lng },
+        travelMode: google.maps.TravelMode.DRIVING
+      }, (response, status) => {
+        if (status === 'OK') {
+          const route = response.routes[0];
+          const leg = route.legs[0];
+          
+          // Add distance to total
+          totalDistance += leg.distance.value / 1000; // Convert to km
+          
+          // Create polyline
+          const polyline = new google.maps.Polyline({
+            path: response.routes[0].overview_path,
+            geodesic: true,
+            strokeColor: color,
+            strokeOpacity: 1.0,
+            strokeWeight: 4,
+            map: map
+          });
+          
+          routePolylines.push(polyline);
+          
+          // Add route info as overlay
+          const midPoint = response.routes[0].overview_path[Math.floor(response.routes[0].overview_path.length / 2)];
+          
+          const routeInfoWindow = new google.maps.InfoWindow({
+            content: `
+              <div style="font-size: 12px; text-align: center;">
+                <strong>${leg.distance.text}</strong><br>
+                <span style="color: #666;">${leg.duration.text}</span>
+              </div>
+            `,
+            position: midPoint
+          });
+          
+          // Show route info on polyline click
+          polyline.addListener('click', () => {
+            routeInfoWindow.open(map);
+          });
+          
+          updateDistanceDisplay();
+          
+        } else {
+          console.error('Directions request failed:', status);
+        }
+      });
+    }
+
+    function updateDistanceDisplay() {
+      const distanceDisplay = document.getElementById('total-distance-display');
+      const distanceValue = document.getElementById('total-distance-value');
+      
+      if (totalDistance > 0) {
+        distanceValue.textContent = `${totalDistance.toFixed(2)} km`;
+        distanceDisplay.style.display = 'block';
+      } else {
+        distanceDisplay.style.display = 'none';
+      }
+    }
+
+    function updatePlottedPointsList() {
+      const container = document.getElementById('plotted-points-container');
+      
+      if (plottedPoints.length === 0) {
+        container.innerHTML = '<p style="color: #666; font-style: italic; font-size: 12px;">No points plotted yet</p>';
+        return;
+      }
+      
+      container.innerHTML = plottedPoints.map((point, index) => `
+        <div class="plotted-point-item">
+          <div class="plotted-point-info">
+            <div class="plotted-point-name">${index + 1}. ${point.name}</div>
+            <div class="plotted-point-coords">${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}</div>
+          </div>
+          <button class="remove-point" onclick="removePointById(${point.id})">×</button>
+        </div>
+      `).join('');
     }
 
     // Initialize map with fallback
@@ -741,6 +1237,36 @@
           console.warn('Some Google Maps services failed to initialize:', serviceError);
         }
 
+        // Add map click listener for plotting points
+        map.addListener('click', (event) => {
+          const clickedLocation = {
+            lat: event.latLng.lat(),
+            lng: event.latLng.lng(),
+            name: `Point ${plottedPoints.length + 1}`
+          };
+          
+          selectLocationForPlotting(clickedLocation, `Point ${plottedPoints.length + 1}`);
+          
+          // Show temporary marker
+          if (infoWindow) {
+            infoWindow.setContent(`
+              <div style="font-family: 'Segoe UI', sans-serif;">
+                <h4 style="margin: 0 0 8px 0;">Location Selected</h4>
+                <p style="margin: 0 0 8px 0; font-size: 13px;">
+                  Lat: ${clickedLocation.lat.toFixed(6)}<br>
+                  Lng: ${clickedLocation.lng.toFixed(6)}
+                </p>
+                <button onclick="plotCurrentPoint()" 
+                        style="background: #FF6B35; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                  📍 Plot This Point
+                </button>
+              </div>
+            `);
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open(map);
+          }
+        });
+
         // Add user location marker if location was obtained
         if (showUserMarker) {
           try {
@@ -831,12 +1357,27 @@
         
         map.controls[google.maps.ControlPosition.TOP_RIGHT].push(centerControl);
 
+        // Plot Point control
+        const plotControl = document.createElement('div');
+        plotControl.className = 'custom-map-control';
+        plotControl.innerHTML = '🎯 Plot Points';
+        plotControl.addEventListener('click', () => {
+          showPlotPanel();
+          document.getElementById('click-to-plot-indicator').style.display = 'block';
+          setTimeout(() => {
+            document.getElementById('click-to-plot-indicator').style.display = 'none';
+          }, 5000);
+        });
+        
+        map.controls[google.maps.ControlPosition.TOP_RIGHT].push(plotControl);
+
         // Clear markers control
         const clearControl = document.createElement('div');
         clearControl.className = 'custom-map-control';
-        clearControl.innerHTML = '🗑️ Clear Markers';
+        clearControl.innerHTML = '🗑️ Clear All';
         clearControl.addEventListener('click', () => {
           clearDestinationMarkers();
+          clearAllPlottedPoints();
           if (infoWindow) {
             infoWindow.close();
           }
@@ -851,6 +1392,7 @@
         searchContainer.innerHTML = `
           <span class="search-icon">🔍</span>
           <input type="text" id="places-search" placeholder="Search places..." autocomplete="off">
+          <div class="search-suggestions" id="search-suggestions"></div>
         `;
         
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(searchContainer);
@@ -862,22 +1404,27 @@
       }
     }
 
-    // Setup Places API search functionality
+    // Setup Places API search functionality with suggestions
     function setupPlacesSearch() {
       const searchInput = document.getElementById('places-search');
-      if (!searchInput) return;
+      const suggestionsContainer = document.getElementById('search-suggestions');
+      if (!searchInput || !suggestionsContainer) return;
 
       let searchTimeout;
+      let currentSuggestions = [];
 
+      // Handle input for suggestions
       searchInput.addEventListener('input', (e) => {
         clearTimeout(searchTimeout);
-        const query = e.target.value;
+        const query = e.target.value.trim();
 
-        if (query.length < 2) return;
+        if (query.length < 2) {
+          hideSuggestions();
+          return;
+        }
 
         searchTimeout = setTimeout(() => {
           if (autocompleteService) {
-            // Use Places Autocomplete for suggestions
             autocompleteService.getPlacePredictions({
               input: query,
               location: userLocation ? new google.maps.LatLng(userLocation.lat, userLocation.lng) : null,
@@ -885,24 +1432,122 @@
               componentRestrictions: { country: 'us' }
             }, (predictions, status) => {
               if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-                if (predictions.length > 0) {
-                  searchPlace(predictions[0].place_id);
-                }
+                showSuggestions(predictions.slice(0, 5)); // Show top 5 suggestions
+              } else {
+                hideSuggestions();
               }
             });
           }
         }, 300);
       });
 
+      // Handle Enter key
       searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          const query = e.target.value;
-          if (query.trim()) {
-            performTextSearch(query);
+          const query = e.target.value.trim();
+          if (query) {
+            if (currentSuggestions.length > 0) {
+              selectSuggestion(currentSuggestions[0]);
+            } else {
+              performTextSearch(query);
+            }
           }
         }
       });
+
+      // Handle focus and blur
+      searchInput.addEventListener('focus', () => {
+        if (currentSuggestions.length > 0) {
+          suggestionsContainer.style.display = 'block';
+        }
+      });
+
+      searchInput.addEventListener('blur', () => {
+        // Delay hiding to allow clicks on suggestions
+        setTimeout(() => {
+          hideSuggestions();
+        }, 150);
+      });
+
+      function showSuggestions(predictions) {
+        currentSuggestions = predictions;
+        suggestionsContainer.innerHTML = '';
+
+        predictions.forEach(prediction => {
+          const suggestionItem = document.createElement('div');
+          suggestionItem.className = 'search-suggestion-item';
+          
+          const iconType = getPlaceIcon(prediction.types);
+          
+          suggestionItem.innerHTML = `
+            <span class="suggestion-icon">${iconType}</span>
+            <div class="suggestion-text">
+              <div class="suggestion-main">${prediction.structured_formatting.main_text}</div>
+              <div class="suggestion-secondary">${prediction.structured_formatting.secondary_text || ''}</div>
+            </div>
+          `;
+
+          suggestionItem.addEventListener('click', () => {
+            selectSuggestion(prediction);
+          });
+
+          suggestionsContainer.appendChild(suggestionItem);
+        });
+
+        suggestionsContainer.style.display = 'block';
+      }
+
+      function hideSuggestions() {
+        suggestionsContainer.style.display = 'none';
+        currentSuggestions = [];
+      }
+
+      function selectSuggestion(prediction) {
+        searchInput.value = prediction.structured_formatting.main_text;
+        hideSuggestions();
+        searchPlace(prediction.place_id);
+      }
+
+      function getPlaceIcon(types) {
+        const iconMap = {
+          restaurant: '🍽️',
+          food: '🍽️',
+          gas_station: '⛽',
+          hospital: '🏥',
+          school: '🏫',
+          university: '🎓',
+          bank: '🏦',
+          atm: '💳',
+          pharmacy: '💊',
+          shopping_mall: '🛒',
+          store: '🏪',
+          park: '🌳',
+          gym: '💪',
+          church: '⛪',
+          mosque: '🕌',
+          synagogue: '🕍',
+          airport: '✈️',
+          subway_station: '🚇',
+          bus_station: '🚌',
+          train_station: '🚂',
+          taxi_stand: '🚖',
+          lodging: '🏨',
+          tourist_attraction: '🎡',
+          museum: '🏛️',
+          library: '📚',
+          post_office: '📮',
+          police: '👮',
+          fire_station: '🚒'
+        };
+
+        for (const type of types) {
+          if (iconMap[type]) {
+            return iconMap[type];
+          }
+        }
+        return '📍'; // Default icon
+      }
     }
 
     // Search for a place by place ID
@@ -1280,6 +1925,13 @@
     window.getDirections = getDirections;
     window.getDirectionsToLocation = getDirectionsToLocation;
     window.centerMapOnLocation = centerMapOnLocation;
+    window.selectLocationForPlotting = selectLocationForPlotting;
+    window.plotCurrentPoint = plotCurrentPoint;
+    window.removePointById = removePointById;
+    window.clearAllPlottedPoints = clearAllPlottedPoints;
+    window.connectAllPoints = connectAllPoints;
+    window.closePlotPanel = closePlotPanel;
+    window.initMap = initMap;
   </script>
 </body>
 </html>
