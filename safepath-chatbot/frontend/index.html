@@ -124,7 +124,7 @@
       right: 60px;
       width: 60px;
       height: 60px;
-      background-color: rgba(234, 234, 234, 0.95);
+      background-color: rgba(255, 255, 255, 0.95);
       backdrop-filter: blur(10px);
       border: 1px solid rgba(255, 255, 255, 0.2);
       border-radius: 50%;
@@ -297,6 +297,35 @@
       40% { opacity: 1; }
     }
 
+      #panic-button {
+        position: fixed;
+        top: 68px;
+        right: 73px;
+        width: 40px;
+        height: 40px;
+        background-color: rgba(234, 234, 234, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        cursor: pointer;
+        overflow: hidden;
+        transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease;
+        z-index: 1000;
+    }
+
+    #panic-label {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 11px;
+      color: #333;
+      text-align: center;
+      font-weight: bold;
+      pointer-events: none;
+    }
+
     /* Map controls styling */
     .custom-map-control {
       background-color: rgba(255, 255, 255, 0.9);
@@ -316,6 +345,7 @@
       background-color: rgba(255, 255, 255, 1);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
+  
 
     /* Search bar styling */
     .search-container {
@@ -655,7 +685,7 @@
       <h4 style="margin: 16px 0 8px 0; font-size: 14px; color: #333;">Plotted Points:</h4>
       <div id="plotted-points-container"></div>
       <div id="total-distance-display" class="total-distance" style="display: none;">
-        Total Distance: <span id="total-distance-value">0 km</span>
+        Total Distance: <s>pan id="total-distance-value">0 km</span>
       </div>
     </div>
   </div>
@@ -677,6 +707,10 @@
         <button id="chat-send">Send</button>
       </div>
     </div>
+  </div>
+
+  <div id="panic-button">
+    <span id="panic-label">call 911!</span>
   </div>
 
   <script>
@@ -1756,8 +1790,8 @@
         const description = [
           "Recent crime trends in any area",
           "Location-specific information", 
-          "Safety tips and security advice, etc.",
-          "Navigate to places by typing them!"
+          "Safety tips and security advice",
+          "Navigation to places from your current location, etc."
         ];
         const list = document.getElementById('description-list');
         list.innerHTML = ''; // Clear existing content

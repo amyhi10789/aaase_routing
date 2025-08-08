@@ -578,7 +578,8 @@ def extract_location_from_query(message):
         'canada', 'mexico', 'brazil', 'argentina', 'uk', 'france', 'germany',
         'italy', 'spain', 'japan', 'china', 'india', 'australia', 'russia',
         'california', 'texas', 'florida', 'new york state', 'washington',
-        'miami', 'boston', 'seattle', 'denver', 'atlanta', 'detroit', 'korea'
+        'miami', 'boston', 'seattle', 'denver', 'atlanta', 'detroit', 'korea',
+        ''
     ]
     
     for location in locations:
