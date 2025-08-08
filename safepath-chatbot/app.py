@@ -11,6 +11,9 @@ import traceback
 import time
 import re
 import math
+import pandas as pd
+import numpy as np
+from math import radians, cos, sin, asin, sqrt
 
 load_dotenv()
 
@@ -839,6 +842,290 @@ If the user asks about their plotted points, routes, or distances, use the plott
         print(f"Error processing chat request: {str(e)}")
         print(traceback.format_exc())
         return jsonify({"response": "Sorry, I encountered an error. Please try rephrasing your question or try again later."}), 500
+
+# Global variable to store crime data (in production, use a database)
+crime_data = None
+violent_crime_types = {
+    # Common violent crime categories - adjust based on your dataset
+    'homicide', 'murder', 'manslaughter', 'assault', 'aggravated assault', 
+    'simple assault', 'robbery', 'armed robbery', 'rape', 'sexual assault',
+    'kidnapping', 'domestic violence', 'battery', 'shooting', 'stabbing',
+    'carjacking', 'purse snatching', 'strong arm robbery', 'other assault', 'theft'
+}
+
+def load_crime_data():
+    """Load and process the Philadelphia crime dataset"""
+    global crime_data
+    try:
+        # Load the CSV file
+        df = pd.read_csv('philly_crime_data.csv')
+        
+        # Extract lat/lng from columns 17 and 18 (0-indexed: 16 and 17)
+        if len(df.columns) >= 18:
+            # Assuming 0-based indexing
+            lat_col = df.columns[16]  # 17th column
+            lng_col = df.columns[17]  # 18th column
+            
+            # Clean and convert coordinates
+            df['latitude'] = pd.to_numeric(df[lat_col], errors='coerce')
+            df['longitude'] = pd.to_numeric(df[lng_col], errors='coerce')
+            
+            # Remove rows with invalid coordinates
+            df = df.dropna(subset=['latitude', 'longitude'])
+            
+            # Filter for Philadelphia area (rough bounds)
+            df = df[
+                (df['latitude'] >= 39.0) & (df['latitude'] <= 41.0) &
+                (df['longitude'] >= -76.0) & (df['longitude'] <= -74.0)
+            ]
+            
+            # Add violent crime classification
+            df['is_violent_crime'] = df.apply(classify_violent_crime, axis=1)
+            
+            crime_data = df
+            print(f"Loaded {len(crime_data)} crime records")
+            print(f"Violent crimes: {len(crime_data[crime_data['is_violent_crime']])}")
+            
+            return True
+        else:
+            print("CSV doesn't have enough columns")
+            return False
+            
+    except FileNotFoundError:
+        print("philly_crime_data.csv not found")
+        return False
+    except Exception as e:
+        print(f"Error loading crime data: {e}")
+        return False
+
+def classify_violent_crime(row):
+    """Classify if a crime is violent based on description/category"""
+    # Check common crime description columns
+    description_cols = ['description', 'crime_type', 'offense', 'incident_type', 'ucr_general']
+    
+    for col in description_cols:
+        if col in row.index and pd.notna(row[col]):
+            description = str(row[col]).lower()
+            if any(violent_type in description for violent_type in violent_crime_types):
+                return True
+    
+    return False
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    Returns distance in feet
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    
+    # Radius of earth in feet (approximately)
+    r = 20902231  # feet
+    
+    return c * r
+
+def get_crimes_within_radius(lat, lng, radius_feet=500):
+    """Get violent crimes within specified radius of a point"""
+    if crime_data is None or crime_data.empty:
+        return {
+            'total_crimes': 0,
+            'violent_crimes': 0,
+            'crime_details': [],
+            'error': 'Crime data not loaded'
+        }
+    
+    try:
+        # Calculate distances for all crime points
+        distances = crime_data.apply(
+            lambda row: haversine_distance(lat, lng, row['latitude'], row['longitude']), 
+            axis=1
+        )
+        
+        # Filter crimes within radius
+        nearby_crimes = crime_data[distances <= radius_feet].copy()
+        nearby_crimes['distance_feet'] = distances[distances <= radius_feet]
+        
+        # Filter for violent crimes
+        violent_crimes = nearby_crimes[nearby_crimes['is_violent_crime']]
+        
+        # Prepare detailed crime information
+        crime_details = []
+        for _, crime in violent_crimes.head(10).iterrows():  # Limit to 10 most recent
+            detail = {
+                'distance_feet': round(crime['distance_feet'], 1),
+                'latitude': crime['latitude'],
+                'longitude': crime['longitude']
+            }
+            
+            # Add available crime information
+            info_cols = ['description', 'crime_type', 'offense', 'incident_type', 'ucr_general', 'date', 'time']
+            for col in info_cols:
+                if col in crime.index and pd.notna(crime[col]):
+                    detail[col] = str(crime[col])
+            
+            crime_details.append(detail)
+        
+        return {
+            'total_crimes': len(nearby_crimes),
+            'violent_crimes': len(violent_crimes),
+            'crime_details': crime_details,
+            'radius_feet': radius_feet,
+            'search_location': {'lat': lat, 'lng': lng}
+        }
+        
+    except Exception as e:
+        print(f"Error getting crimes within radius: {e}")
+        return {
+            'total_crimes': 0,
+            'violent_crimes': 0,
+            'crime_details': [],
+            'error': str(e)
+        }
+
+def get_crime_density_map(bounds, grid_size=20):
+    """Get crime density data for map visualization"""
+    if crime_data is None:
+        return {'error': 'Crime data not loaded'}
+    
+    try:
+        # Extract bounds
+        north = bounds['north']
+        south = bounds['south']
+        east = bounds['east']
+        west = bounds['west']
+        
+        # Filter crimes within bounds
+        bounded_crimes = crime_data[
+            (crime_data['latitude'] >= south) & (crime_data['latitude'] <= north) &
+            (crime_data['longitude'] >= west) & (crime_data['longitude'] <= east) &
+            (crime_data['is_violent_crime'] == True)
+        ]
+        
+        if bounded_crimes.empty:
+            return {'density_points': []}
+        
+        # Create grid
+        lat_step = (north - south) / grid_size
+        lng_step = (east - west) / grid_size
+        
+        density_points = []
+        
+        for i in range(grid_size):
+            for j in range(grid_size):
+                grid_lat = south + (i + 0.5) * lat_step
+                grid_lng = west + (j + 0.5) * lng_step
+                
+                # Count crimes within this grid cell
+                cell_crimes = bounded_crimes[
+                    (bounded_crimes['latitude'] >= south + i * lat_step) &
+                    (bounded_crimes['latitude'] < south + (i + 1) * lat_step) &
+                    (bounded_crimes['longitude'] >= west + j * lng_step) &
+                    (bounded_crimes['longitude'] < west + (j + 1) * lng_step)
+                ]
+                
+                if len(cell_crimes) > 0:
+                    density_points.append({
+                        'lat': grid_lat,
+                        'lng': grid_lng,
+                        'count': len(cell_crimes),
+                        'intensity': min(len(cell_crimes) / 10.0, 1.0)  # Normalize to 0-1
+                    })
+        
+        return {'density_points': density_points}
+        
+    except Exception as e:
+        return {'error': str(e)}
+
+# API endpoint for crime data within radius
+@app.route("/api/crimes-nearby", methods=["POST"])
+def crimes_nearby():
+    """Get violent crimes within radius of a point"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        lat = data.get("lat")
+        lng = data.get("lng")
+        radius = data.get("radius", 500)  # Default 500 feet
+        
+        if lat is None or lng is None:
+            return jsonify({"error": "Latitude and longitude are required"}), 400
+        
+        # Load crime data if not already loaded
+        if crime_data is None:
+            if not load_crime_data():
+                return jsonify({"error": "Failed to load crime data"}), 500
+        
+        # Get crimes within radius
+        result = get_crimes_within_radius(lat, lng, radius)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in crimes_nearby: {e}")
+        return jsonify({"error": "Failed to get nearby crimes"}), 500
+
+# API endpoint for crime density heatmap
+@app.route("/api/crime-density", methods=["POST"])
+def crime_density():
+    """Get crime density data for heatmap visualization"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        bounds = data.get("bounds")
+        grid_size = data.get("grid_size", 20)
+        
+        if not bounds:
+            return jsonify({"error": "Map bounds are required"}), 400
+        
+        # Load crime data if not already loaded
+        if crime_data is None:
+            if not load_crime_data():
+                return jsonify({"error": "Failed to load crime data"}), 500
+        
+        # Get density data
+        result = get_crime_density_map(bounds, grid_size)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Error in crime_density: {e}")
+        return jsonify({"error": "Failed to get crime density"}), 500
+
+# API endpoint to reload crime data
+@app.route("/api/reload-crime-data", methods=["POST"])
+def reload_crime_data():
+    """Reload the crime dataset"""
+    try:
+        success = load_crime_data()
+        if success:
+            return jsonify({
+                "success": True, 
+                "message": "Crime data reloaded successfully",
+                "total_records": len(crime_data),
+                "violent_crimes": len(crime_data[crime_data['is_violent_crime']])
+            })
+        else:
+            return jsonify({"error": "Failed to reload crime data"}), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Initialize crime data when the app starts
+try:
+    load_crime_data()
+except Exception as e:
+    print(f"Failed to load crime data on startup: {e}")
 
 @app.route("/api/plot-point", methods=["POST"])
 def plot_point():

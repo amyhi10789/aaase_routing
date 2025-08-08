@@ -637,6 +637,89 @@
       0%, 100% { opacity: 0.7; }
       50% { opacity: 1; }
     }
+
+    /* Crime data popup styles */
+    .crime-risk-indicator {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: bold;
+      margin: 2px;
+    }
+
+    .risk-low { background: #e8f5e8; color: #2e7d32; }
+    .risk-medium { background: #fff3e0; color: #ef6c00; }
+    .risk-high { background: #ffebee; color: #c62828; }
+    .risk-very-high { background: #ffcdd2; color: #b71c1c; }
+
+    /* Crime heatmap styles */
+    .crime-hotspot-marker {
+      background: radial-gradient(circle, rgba(255,0,0,0.7) 0%, rgba(255,0,0,0.1) 70%, transparent 100%);
+      border-radius: 50%;
+      animation: pulse-red 2s infinite;
+    }
+
+    @keyframes pulse-red {
+      0% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.1); opacity: 0.9; }
+      100% { transform: scale(1); opacity: 0.7; }
+    }
+
+    /* Enhanced info window styles */
+    .crime-info-section {
+      background: rgba(255, 0, 0, 0.1);
+      padding: 8px;
+      border-radius: 6px;
+      margin: 8px 0;
+      border-left: 4px solid #d32f2f;
+    }
+
+    .safety-recommendations {
+      background: #f5f5f5;
+      padding: 8px;
+      border-radius: 4px;
+      margin-top: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .crime-control-panel {
+      position: fixed;
+      top: 120px;
+      right: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      z-index: 1000;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 12px;
+      display: none;
+    }
+
+    .crime-control-panel.active {
+      display: block;
+    }
+
+    .crime-toggle-btn {
+      background: #1976d2;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 2px;
+      font-size: 11px;
+    }
+
+    .crime-toggle-btn:hover {
+      background: #1565c0;
+    }
+
+    .crime-toggle-btn.active {
+      background: #d32f2f;
+    }
   </style>
 </head>
 <body>
@@ -707,6 +790,20 @@
         <button id="chat-send">Send</button>
       </div>
     </div>
+  </div>
+
+    <!-- Crime Data Control Panel -->
+  <div id="crime-control-panel" class="crime-control-panel">
+    <h4 style="margin: 0 0 8px 0;">Crime Data Controls</h4>
+    <button id="toggle-crime-heatmap" class="crime-toggle-btn" onclick="toggleCrimeHeatmap()">
+      🗺️ Toggle Heatmap
+    </button>
+    <button id="show-area-stats" class="crime-toggle-btn" onclick="showAreaCrimeStats()">
+      📊 Area Stats  
+    </button>
+    <button id="refresh-crime-data" class="crime-toggle-btn" onclick="refreshCrimeData()">
+      🔄 Refresh Data
+    </button>
   </div>
 
   <div id="panic-button">
@@ -1966,6 +2063,765 @@
     window.connectAllPoints = connectAllPoints;
     window.closePlotPanel = closePlotPanel;
     window.initMap = initMap;
+
+    // Global variables for crime data
+    let crimeHeatmapData = [];
+    let crimeInfoWindows = [];
+    let showCrimeData = false;
+
+    // Enhanced map click listener with crime data
+    function addMapClickListenerWithCrime() {
+      if (!map) return;
+      
+      // Remove existing listener and add enhanced one
+      google.maps.event.clearListeners(map, 'click');
+      
+      map.addListener('click', async (event) => {
+        const clickedLocation = {
+          lat: event.latLng.lat(),
+          lng: event.latLng.lng(),
+          name: `Point ${plottedPoints.length + 1}`
+        };
+        
+        selectLocationForPlotting(clickedLocation, `Point ${plottedPoints.length + 1}`);
+        
+        // Get crime data for this location
+        try {
+          const crimeData = await getCrimesNearLocation(clickedLocation.lat, clickedLocation.lng);
+          
+          // Enhanced info window content with crime data
+          const crimeInfo = formatCrimeInfo(crimeData);
+          
+          if (infoWindow) {
+            infoWindow.setContent(`
+              <div style="font-family: 'Segoe UI', sans-serif; max-width: 300px;">
+                <h4 style="margin: 0 0 8px 0;">Location Selected</h4>
+                <p style="margin: 0 0 8px 0; font-size: 13px;">
+                  Lat: ${clickedLocation.lat.toFixed(6)}<br>
+                  Lng: ${clickedLocation.lng.toFixed(6)}
+                </p>
+                
+                <!-- Crime Data Section -->
+                <div style="background: rgba(255,0,0,0.1); padding: 8px; border-radius: 6px; margin: 8px 0;">
+                  <h5 style="margin: 0 0 4px 0; color: #d32f2f; font-size: 14px;">
+                    🚨 Crime Data (500ft radius)
+                  </h5>
+                  ${crimeInfo}
+                </div>
+                
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+                  <button onclick="plotCurrentPoint()" 
+                          style="background: #FF6B35; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    📍 Plot This Point
+                  </button>
+                  <button onclick="showCrimeDetails(${clickedLocation.lat}, ${clickedLocation.lng})" 
+                          style="background: #d32f2f; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    🔍 Crime Details
+                  </button>
+                  <button onclick="toggleCrimeHeatmap()" 
+                          style="background: #1976d2; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    🗺️ Crime Heatmap
+                  </button>
+                </div>
+              </div>
+            `);
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open(map);
+          }
+        } catch (error) {
+          console.error('Error getting crime data:', error);
+          
+          // Fallback to basic info window
+          if (infoWindow) {
+            infoWindow.setContent(`
+              <div style="font-family: 'Segoe UI', sans-serif;">
+                <h4 style="margin: 0 0 8px 0;">Location Selected</h4>
+                <p style="margin: 0 0 8px 0; font-size: 13px;">
+                  Lat: ${clickedLocation.lat.toFixed(6)}<br>
+                  Lng: ${clickedLocation.lng.toFixed(6)}
+                </p>
+                <div style="background: rgba(255,165,0,0.1); padding: 8px; border-radius: 6px; margin: 8px 0;">
+                  <p style="margin: 0; color: #ff8f00; font-size: 12px;">
+                    ⚠️ Crime data temporarily unavailable
+                  </p>
+                </div>
+                <button onclick="plotCurrentPoint()" 
+                        style="background: #FF6B35; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                  📍 Plot This Point
+                </button>
+              </div>
+            `);
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open(map);
+          }
+        }
+      });
+    }
+
+    // Get crimes near a location
+    async function getCrimesNearLocation(lat, lng, radius = 500) {
+      try {
+        const response = await fetch('/api/crimes-nearby', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            lat: lat,
+            lng: lng,
+            radius: radius
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data;
+        
+      } catch (error) {
+        console.error('Error fetching crime data:', error);
+        return {
+          total_crimes: 0,
+          violent_crimes: 0,
+          crime_details: [],
+          error: error.message
+        };
+      }
+    }
+
+    // Format crime information for display
+    function formatCrimeInfo(crimeData) {
+      if (crimeData.error) {
+        return `<p style="margin: 0; color: #ff8f00; font-size: 12px;">⚠️ ${crimeData.error}</p>`;
+      }
+      
+      if (crimeData.violent_crimes === 0) {
+        return `
+          <p style="margin: 0; color: #4caf50; font-size: 12px;">
+            ✅ No violent crimes found within 500 feet
+          </p>
+          <p style="margin: 4px 0 0 0; color: #666; font-size: 11px;">
+            Total incidents: ${crimeData.total_crimes || 0}
+          </p>
+        `;
+      }
+      
+      const riskLevel = getRiskLevel(crimeData.violent_crimes);
+      const riskColor = getRiskColor(riskLevel);
+      
+      return `
+        <div style="margin: 0;">
+          <p style="margin: 0 0 4px 0; font-weight: bold; color: ${riskColor}; font-size: 13px;">
+            ${riskLevel.icon} ${crimeData.violent_crimes} violent crime${crimeData.violent_crimes !== 1 ? 's' : ''} found
+          </p>
+          <p style="margin: 0; color: #666; font-size: 11px;">
+            Total incidents: ${crimeData.total_crimes} | Risk: ${riskLevel.level}
+          </p>
+        </div>
+      `;
+    }
+
+    // Determine risk level based on violent crime count
+    function getRiskLevel(violentCrimeCount) {
+      if (violentCrimeCount === 0) {
+        return { level: 'Low', icon: '🟢', color: '#4caf50' };
+      } else if (violentCrimeCount <= 2) {
+        return { level: 'Medium', icon: '🟡', color: '#ff9800' };
+      } else if (violentCrimeCount <= 5) {
+        return { level: 'High', icon: '🟠', color: '#f57c00' };
+      } else {
+        return { level: 'Very High', icon: '🔴', color: '#d32f2f' };
+      }
+    }
+
+    // Get risk color
+    function getRiskColor(riskLevel) {
+      return riskLevel.color;
+    }
+
+    // Show detailed crime information in a popup
+    async function showCrimeDetails(lat, lng) {
+      try {
+        const crimeData = await getCrimesNearLocation(lat, lng);
+        
+        // Create detailed crime popup
+        const detailsPopup = document.createElement('div');
+        detailsPopup.id = 'crime-details-popup';
+        detailsPopup.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+          max-width: 500px;
+          max-height: 600px;
+          overflow-y: auto;
+          padding: 20px;
+          z-index: 10000;
+          font-family: 'Segoe UI', sans-serif;
+        `;
+        
+        let detailsHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0; color: #333;">Crime Details</h3>
+            <button onclick="closeCrimeDetails()" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+          </div>
+          
+          <div style="background: rgba(0,0,0,0.05); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+            <p style="margin: 0; font-size: 14px;"><strong>Location:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</p>
+            <p style="margin: 4px 0 0 0; font-size: 14px;"><strong>Search Radius:</strong> 500 feet</p>
+          </div>
+        `;
+        
+        if (crimeData.error) {
+          detailsHTML += `<p style="color: #d32f2f;">Error: ${crimeData.error}</p>`;
+        } else {
+          const riskLevel = getRiskLevel(crimeData.violent_crimes);
+          
+          detailsHTML += `
+            <div style="background: ${riskLevel.color}20; padding: 12px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid ${riskLevel.color};">
+              <h4 style="margin: 0 0 8px 0; color: ${riskLevel.color};">
+                ${riskLevel.icon} Risk Level: ${riskLevel.level}
+              </h4>
+              <p style="margin: 0;"><strong>Violent Crimes:</strong> ${crimeData.violent_crimes}</p>
+              <p style="margin: 4px 0 0 0;"><strong>Total Incidents:</strong> ${crimeData.total_crimes}</p>
+            </div>
+          `;
+          
+          if (crimeData.crime_details && crimeData.crime_details.length > 0) {
+            detailsHTML += `<h4 style="margin: 16px 0 12px 0;">Recent Violent Crimes:</h4>`;
+            
+            crimeData.crime_details.forEach((crime, index) => {
+              detailsHTML += `
+                <div style="background: #f5f5f5; padding: 12px; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">
+                  <div style="font-weight: bold; color: #d32f2f; margin-bottom: 4px;">
+                    Crime #${index + 1} - ${crime.distance_feet}ft away
+                  </div>
+                  <div><strong>Type:</strong> ${crime.description || crime.crime_type || crime.offense || 'Unknown'}</div>
+                  ${crime.date ? `<div><strong>Date:</strong> ${crime.date}</div>` : ''}
+                  ${crime.time ? `<div><strong>Time:</strong> ${crime.time}</div>` : ''}
+                  <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                    Location: ${crime.latitude.toFixed(4)}, ${crime.longitude.toFixed(4)}
+                  </div>
+                </div>
+              `;
+            });
+          } else if (crimeData.violent_crimes === 0) {
+            detailsHTML += `
+              <div style="background: #e8f5e8; padding: 16px; border-radius: 8px; text-align: center;">
+                <h4 style="margin: 0 0 8px 0; color: #4caf50;">✅ Good News!</h4>
+                <p style="margin: 0;">No violent crimes found within 500 feet of this location.</p>
+              </div>
+            `;
+          }
+        }
+        
+        detailsHTML += `</div>`;
+        detailsPopup.innerHTML = detailsHTML;
+        
+        // Add overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'crime-details-overlay';
+        overlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 9999;
+        `;
+        overlay.onclick = closeCrimeDetails;
+        
+        document.body.appendChild(overlay);
+        document.body.appendChild(detailsPopup);
+        
+      } catch (error) {
+        console.error('Error showing crime details:', error);
+        alert('Failed to load crime details');
+      }
+    }
+
+    // Close crime details popup
+    function closeCrimeDetails() {
+      const popup = document.getElementById('crime-details-popup');
+      const overlay = document.getElementById('crime-details-overlay');
+      
+      if (popup) popup.remove();
+      if (overlay) overlay.remove();
+    }
+
+    // Toggle crime heatmap display
+    async function toggleCrimeHeatmap() {
+      if (!map) return;
+      
+      if (showCrimeData) {
+        // Hide heatmap
+        clearCrimeHeatmap();
+        showCrimeData = false;
+      } else {
+        // Show heatmap
+        await displayCrimeHeatmap();
+        showCrimeData = true;
+      }
+    }
+
+    // Display crime heatmap
+    async function displayCrimeHeatmap() {
+      if (!map) return;
+      
+      try {
+        const bounds = map.getBounds();
+        if (!bounds) return;
+        
+        const boundsData = {
+          north: bounds.getNorthEast().lat(),
+          south: bounds.getSouthWest().lat(),
+          east: bounds.getNorthEast().lng(),
+          west: bounds.getSouthWest().lng()
+        };
+        
+        const response = await fetch('/api/crime-density', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            bounds: boundsData,
+            grid_size: 25
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          console.error('Crime heatmap error:', data.error);
+          return;
+        }
+        
+        // Create heatmap circles
+        clearCrimeHeatmap();
+        
+        if (data.density_points && data.density_points.length > 0) {
+          data.density_points.forEach(point => {
+            const circle = new google.maps.Circle({
+              center: { lat: point.lat, lng: point.lng },
+              radius: 200, // 200 meter radius
+              fillColor: '#ff0000',
+              fillOpacity: Math.min(point.intensity * 0.6, 0.6),
+              strokeColor: '#ff0000',
+              strokeOpacity: Math.min(point.intensity * 0.8, 0.8),
+              strokeWeight: 1,
+              map: map
+            });
+            
+            crimeHeatmapData.push(circle);
+            
+            // Add info window for crime hotspots
+            const infoWindow = new google.maps.InfoWindow({
+              content: `
+                <div style="font-family: 'Segoe UI', sans-serif;">
+                  <h4 style="margin: 0 0 8px 0; color: #d32f2f;">Crime Hotspot</h4>
+                  <p style="margin: 0;"><strong>Violent Crimes:</strong> ${point.count}</p>
+                  <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">
+                    This area has higher than average violent crime activity
+                  </p>
+                </div>
+              `
+            });
+            
+            circle.addListener('click', () => {
+              infoWindow.setPosition({ lat: point.lat, lng: point.lng });
+              infoWindow.open(map);
+            });
+            
+            crimeInfoWindows.push(infoWindow);
+          });
+          
+          console.log(`Displayed ${data.density_points.length} crime hotspots`);
+        } else {
+          // Show message that no crime data is available
+          if (infoWindow) {
+            infoWindow.setContent(`
+              <div style="font-family: 'Segoe UI', sans-serif; text-align: center;">
+                <h4 style="margin: 0 0 8px 0; color: #4caf50;">✅ Good News!</h4>
+                <p style="margin: 0;">No significant violent crime activity found in this area.</p>
+              </div>
+            `);
+            infoWindow.setPosition(map.getCenter());
+            infoWindow.open(map);
+          }
+        }
+        
+      } catch (error) {
+        console.error('Error displaying crime heatmap:', error);
+      }
+    }
+
+    // Clear crime heatmap
+    function clearCrimeHeatmap() {
+      crimeHeatmapData.forEach(element => {
+        element.setMap(null);
+      });
+      crimeHeatmapData = [];
+      
+      crimeInfoWindows.forEach(window => {
+        window.close();
+      });
+      crimeInfoWindows = [];
+    }
+
+    // Enhanced createMap function to include crime data integration
+    function createMapWithCrime(location, showUserMarker = true) {
+      // Call the original createMap function first
+      createMap(location, showUserMarker);
+      
+      // Add crime data integration after map is loaded
+      setTimeout(() => {
+        if (map) {
+          addMapClickListenerWithCrime();
+          
+          // Add crime data control button
+          addCrimeDataControls();
+        }
+      }, 1000);
+    }
+
+    // Add crime data controls to the map
+    function addCrimeDataControls() {
+      if (!map) return;
+      
+      try {
+        // Crime heatmap toggle control
+        const crimeControl = document.createElement('div');
+        crimeControl.className = 'custom-map-control';
+        crimeControl.innerHTML = '🚨 Crime Data';
+        crimeControl.addEventListener('click', toggleCrimeHeatmap);
+        
+        map.controls[google.maps.ControlPosition.TOP_RIGHT].push(crimeControl);
+
+        // Crime statistics control
+        const statsControl = document.createElement('div');
+        statsControl.className = 'custom-map-control';
+        statsControl.innerHTML = '📊 Crime Stats';
+        statsControl.addEventListener('click', showAreaCrimeStats);
+        
+        map.controls[google.maps.ControlPosition.TOP_RIGHT].push(statsControl);
+        
+      } catch (controlError) {
+        console.warn('Failed to add crime data controls:', controlError);
+      }
+    }
+
+    // Show area crime statistics
+    async function showAreaCrimeStats() {
+      if (!map) return;
+      
+      try {
+        const center = map.getCenter();
+        const crimeData = await getCrimesNearLocation(center.lat(), center.lng(), 2000); // 2000 feet radius
+        
+        const statsPopup = document.createElement('div');
+        statsPopup.id = 'crime-stats-popup';
+        statsPopup.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+          max-width: 400px;
+          padding: 20px;
+          z-index: 10000;
+          font-family: 'Segoe UI', sans-serif;
+        `;
+        
+        const riskLevel = getRiskLevel(crimeData.violent_crimes);
+        
+        statsPopup.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0; color: #333;">Area Crime Statistics</h3>
+            <button onclick="closeCrimeStats()" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+          </div>
+          
+          <div style="text-align: center; margin-bottom: 16px;">
+            <div style="font-size: 48px; margin-bottom: 8px;">${riskLevel.icon}</div>
+            <div style="font-size: 20px; font-weight: bold; color: ${riskLevel.color};">${riskLevel.level} Risk</div>
+            <div style="font-size: 14px; color: #666;">Within 2000 feet of map center</div>
+          </div>
+          
+          <div style="background: #f5f5f5; padding: 16px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span>Violent Crimes:</span>
+              <strong style="color: ${riskLevel.color};">${crimeData.violent_crimes}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span>Total Incidents:</span>
+              <strong>${crimeData.total_crimes}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Search Radius:</span>
+              <strong>2000 feet</strong>
+            </div>
+          </div>
+          
+          <div style="margin-top: 16px; text-align: center;">
+            <button onclick="toggleCrimeHeatmap(); closeCrimeStats();" 
+                    style="background: #1976d2; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
+              Show Crime Heatmap
+            </button>
+          </div>
+        `;
+        
+        // Add overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'crime-stats-overlay';
+        overlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 9999;
+        `;
+        overlay.onclick = closeCrimeStats;
+        
+        document.body.appendChild(overlay);
+        document.body.appendChild(statsPopup);
+        
+      } catch (error) {
+        console.error('Error showing area crime stats:', error);
+        alert('Failed to load crime statistics');
+      }
+    }
+
+    // Close crime stats popup
+    function closeCrimeStats() {
+      const popup = document.getElementById('crime-stats-popup');
+      const overlay = document.getElementById('crime-stats-overlay');
+      
+      if (popup) popup.remove();
+      if (overlay) overlay.remove();
+    }
+
+    // Auto-refresh crime data when map moves significantly
+    function setupCrimeDataRefresh() {
+      if (!map) return;
+      
+      let refreshTimeout;
+      
+      map.addListener('bounds_changed', () => {
+        if (showCrimeData) {
+          clearTimeout(refreshTimeout);
+          refreshTimeout = setTimeout(() => {
+            displayCrimeHeatmap();
+          }, 1000); // Refresh after 1 second of no movement
+        }
+      });
+    }
+
+    // Add safety recommendations based on crime data
+    function getSafetyRecommendations(crimeData) {
+      const recommendations = [];
+      
+      if (crimeData.violent_crimes === 0) {
+        recommendations.push("✅ This area appears relatively safe based on recent data");
+        recommendations.push("🚶 Normal precautions should be sufficient");
+      } else if (crimeData.violent_crimes <= 2) {
+        recommendations.push("⚠️ Exercise normal urban caution in this area");
+        recommendations.push("👥 Consider traveling in groups during late hours");
+        recommendations.push("💡 Stay in well-lit areas");
+      } else if (crimeData.violent_crimes <= 5) {
+        recommendations.push("🚨 This area has elevated crime activity");
+        recommendations.push("👥 Avoid walking alone, especially at night");
+        recommendations.push("📱 Keep emergency contacts readily available");
+        recommendations.push("💡 Stick to main streets and well-lit areas");
+      } else {
+        recommendations.push("⛔ High crime activity area - exercise extreme caution");
+        recommendations.push("🚗 Consider alternative transportation methods");
+        recommendations.push("👥 Do not travel alone");
+        recommendations.push("📱 Inform others of your location and plans");
+        recommendations.push("⏰ Avoid the area during late night hours");
+      }
+      
+      return recommendations;
+    }
+
+    // Enhanced plotCurrentPoint with crime context
+    function plotCurrentPointWithCrime() {
+      if (!selectedLocation) return;
+      
+      // Get crime data for the point being plotted
+      getCrimesNearLocation(selectedLocation.lat, selectedLocation.lng).then(crimeData => {
+        const pointId = Date.now();
+        const riskLevel = getRiskLevel(crimeData.violent_crimes);
+        
+        const point = {
+          id: pointId,
+          lat: selectedLocation.lat,
+          lng: selectedLocation.lng,
+          name: selectedLocation.name || `Point ${plottedPoints.length + 1}`,
+          timestamp: new Date().toLocaleTimeString(),
+          crimeData: crimeData,
+          riskLevel: riskLevel
+        };
+        
+        plottedPoints.push(point);
+        
+        // Create marker with risk-based color
+        const markerColor = riskLevel.level === 'Low' ? '#4CAF50' : 
+                          riskLevel.level === 'Medium' ? '#FF9800' : 
+                          riskLevel.level === 'High' ? '#F57C00' : '#D32F2F';
+        
+        const marker = new google.maps.Marker({
+          position: { lat: point.lat, lng: point.lng },
+          map: map,
+          title: `${point.name} - ${riskLevel.level} Risk`,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 12,
+            fillColor: markerColor,
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 3,
+          },
+          animation: google.maps.Animation.DROP,
+          zIndex: 999
+        });
+
+        // Enhanced click listener with crime info
+        marker.addListener('click', () => {
+          showPointInfoWindowWithCrime(marker, point);
+        });
+        
+        plottedMarkers.push({ marker, point });
+        
+        // Clear selection
+        selectedLocation = null;
+        updatePlotPanel();
+        
+        // Auto-connect if more than one point
+        if (plottedPoints.length > 1) {
+          setTimeout(connectAllPoints, 500);
+        }
+        
+        console.log(`Plotted point: ${point.name} at ${point.lat}, ${point.lng} with ${riskLevel.level} crime risk`);
+      }).catch(error => {
+        console.error('Error getting crime data for plotted point:', error);
+        // Fallback to original plotting function
+        plotCurrentPoint();
+      });
+    }
+
+    // Enhanced point info window with crime data
+    function showPointInfoWindowWithCrime(marker, point) {
+      const safetyRecommendations = getSafetyRecommendations(point.crimeData || {});
+      
+      const content = `
+        <div style="font-family: 'Segoe UI', sans-serif; max-width: 300px;">
+          <h4 style="margin: 0 0 8px 0; color: #333;">${point.name}</h4>
+          
+          <div style="background: ${point.riskLevel?.color}20; padding: 8px; border-radius: 6px; margin: 8px 0; border-left: 4px solid ${point.riskLevel?.color};">
+            <div style="font-weight: bold; color: ${point.riskLevel?.color}; margin-bottom: 4px;">
+              ${point.riskLevel?.icon} Safety Risk: ${point.riskLevel?.level}
+            </div>
+            <div style="font-size: 12px;">
+              Violent crimes within 500ft: ${point.crimeData?.violent_crimes || 0}
+            </div>
+          </div>
+          
+          <div style="font-size: 11px; color: #666; margin-bottom: 8px;">
+            Plotted: ${point.timestamp}<br>
+            Location: ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}
+          </div>
+          
+          <details style="margin: 8px 0;">
+            <summary style="cursor: pointer; font-weight: bold; font-size: 12px; color: #1976d2;">
+              Safety Recommendations
+            </summary>
+            <div style="margin-top: 8px; font-size: 11px; line-height: 1.4;">
+              ${safetyRecommendations.map(rec => `<div style="margin: 2px 0;">${rec}</div>`).join('')}
+            </div>
+          </details>
+          
+          <div style="display: flex; gap: 6px; margin-top: 8px;">
+            <button onclick="removePointById(${point.id})" 
+                    style="background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+              Remove Point
+            </button>
+            <button onclick="showCrimeDetails(${point.lat}, ${point.lng})" 
+                    style="background: #1976d2; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+              Crime Details
+            </button>
+          </div>
+        </div>
+      `;
+      
+      if (infoWindow) {
+        infoWindow.setContent(content);
+        infoWindow.open(map, marker);
+      }
+    }
+
+    // Initialize crime data integration when map loads
+    function initializeWithCrimeData() {
+      // Replace the original createMap call with enhanced version
+      const originalCreateMap = window.createMap;
+      
+      window.createMap = function(location, showUserMarker = true) {
+        originalCreateMap(location, showUserMarker);
+        
+        // Add crime data integration after map loads
+        setTimeout(() => {
+          if (map) {
+            addMapClickListenerWithCrime();
+            addCrimeDataControls();
+            setupCrimeDataRefresh();
+          }
+        }, 1000);
+      };
+      
+      // Replace the original plotCurrentPoint with enhanced version
+      const originalPlotCurrentPoint = window.plotCurrentPoint;
+      
+      window.plotCurrentPoint = function() {
+        if (typeof getCrimesNearLocation === 'function') {
+          plotCurrentPointWithCrime();
+        } else {
+          originalPlotCurrentPoint();
+        }
+      };
+    }
+
+    // Make functions globally available
+    window.getCrimesNearLocation = getCrimesNearLocation;
+    window.showCrimeDetails = showCrimeDetails;
+    window.closeCrimeDetails = closeCrimeDetails;
+    window.toggleCrimeHeatmap = toggleCrimeHeatmap;
+    window.showAreaCrimeStats = showAreaCrimeStats;
+    window.closeCrimeStats = closeCrimeStats;
+    window.plotCurrentPointWithCrime = plotCurrentPointWithCrime;
+
+    // Initialize when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeWithCrimeData();
+    });
+
+    console.log('Crime data integration loaded successfully');
   </script>
 </body>
 </html>
