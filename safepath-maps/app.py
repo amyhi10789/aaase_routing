@@ -858,7 +858,7 @@ def load_crime_data():
     global crime_data
     try:
         # Load the CSV file
-        df = pd.read_csv('philly_crime_data.csv')
+        df = pd.read_csv('safepath-maps/philly_crime_data.csv')
         
         # Extract lat/lng from columns 17 and 18 (0-indexed: 16 and 17)
         if len(df.columns) >= 18:
@@ -899,9 +899,10 @@ def load_crime_data():
         return False
 
 def classify_violent_crime(row):
+    #return True
     """Classify if a crime is violent based on description/category"""
     # Check common crime description columns
-    description_cols = ['description', 'crime_type', 'offense', 'incident_type', 'ucr_general']
+    description_cols = ['text_general_code']
     
     for col in description_cols:
         if col in row.index and pd.notna(row[col]):
@@ -1126,6 +1127,56 @@ try:
     load_crime_data()
 except Exception as e:
     print(f"Failed to load crime data on startup: {e}")
+
+def read_coordinates_from_file(filename):
+    """
+    Reads a file where each line has two doubles: latitude and longitude.
+    Returns a list of dicts: [{"lat": float, "lng": float}, ...]
+    """
+    coordinates = []
+    with open(filename, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 2:
+                continue  # skip bad lines
+            try:
+                lat, lng = map(float, parts)
+                coordinates.append({"lat": lat, "lng": lng})
+            except ValueError:
+                continue
+    return coordinates
+
+@app.route("/api/plot-all-points", methods=["POST"])
+def plot_all_points():
+    try:
+        filename = "safepath-maps/path.txt"
+        coords = read_coordinates_from_file(filename)
+
+        session_id = get_or_create_session_id()
+        for coord in coords:
+            point_data = {
+                "lat": coord["lat"],
+                "lng": coord["lng"],
+                "name": f"Point {len(get_user_plotted_points(session_id)) + 1}",
+                "address": "",
+                "notes": ""
+            }
+            add_plotted_point(session_id, point_data)
+
+        points = get_user_plotted_points(session_id)
+        total_distance = calculate_total_route_distance(points)
+
+        return jsonify({
+            "success": True,
+            "total_points": len(points),
+            "total_distance_km": round(total_distance, 2),
+            "points": points
+        })
+
+    except Exception as e:
+        print(f"Error plotting all points: {str(e)}")
+        return jsonify({"error": "Failed to plot all points"}), 500
+
 
 @app.route("/api/plot-point", methods=["POST"])
 def plot_point():
