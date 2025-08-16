@@ -343,7 +343,7 @@
     
     .custom-map-control:hover {
       background-color: rgba(255, 255, 255, 1);
-      box-shadow: 0 4px 12px #0000004d;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
   
 
@@ -1279,8 +1279,8 @@
         (position) => {
           clearTimeout(loadingTimeout);
           userLocation = {
-            lat: /*position.coords.latitude,*/ 39.95,
-            lng:/* position.coords.longitude*/ -75
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
           };
           updateLoadingStatus('Creating map...');
           createMap(userLocation);
@@ -1443,7 +1443,6 @@
 
         // Initialize chatbot content
         loadCrimeData();
-        plotAllFromFile();
 
         updateLoadingStatus('Ready!');
         setTimeout(() => {
@@ -1883,61 +1882,26 @@
 
     // Load dynamic content
     async function loadCrimeData() {
-        try {
-          document.getElementById('popup-title').textContent = "SafePath Chatbot";
-          const description = [
-            "Recent crime trends in any area",
-            "Location-specific information", 
-            "Safety tips and security advice",
-            "Navigation to places from your current location, etc."
-          ];
-          const list = document.getElementById('description-list');
-          list.innerHTML = ''; // Clear existing content
-          description.forEach(item => {
-            const li = document.createElement('li');
-            li.textContent = item;
-            list.appendChild(li);
-          });
-          setTimeout(adjustPopupHeight, 0);
-        } catch (error) {
-          console.warn('Failed to load crime data:', error);
-        }
+      try {
+        document.getElementById('popup-title').textContent = "SafePath Chatbot";
+        const description = [
+          "Recent crime trends in any area",
+          "Location-specific information", 
+          "Safety tips and security advice",
+          "Navigation to places from your current location, etc."
+        ];
+        const list = document.getElementById('description-list');
+        list.innerHTML = ''; // Clear existing content
+        description.forEach(item => {
+          const li = document.createElement('li');
+          li.textContent = item;
+          list.appendChild(li);
+        });
+        setTimeout(adjustPopupHeight, 0);
+      } catch (error) {
+        console.warn('Failed to load crime data:', error);
       }
-      async function plotAllFromFile() {
-        try {
-          const response = await fetch("/api/plot-all-points", { method: "POST" });
-          if (!response.ok) {
-            console.error("Failed to load points from file");
-            return;
-          }
-
-          const result = await response.json();
-          if (!result.success) {
-            console.error("Error:", result.error);
-            return;
-          }
-
-          // Delay helper
-          const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-          for (const p of result.points) {
-            selectedLocation = {
-              lat: p.lat,
-              lng: p.lng,
-              name: p.name
-            };
-            plotCurrentPoint();
-            await sleep(500); // 0.5s delay before plotting the next one
-          }
-
-          console.log(`Total plotted: ${result.total_points}, Distance: ${result.total_distance_km} km`);
-        } catch (err) {
-          console.error("Error auto-plotting points:", err);
-        }
     }
-
-
-
 
     // Auto-expand textarea
     input.addEventListener('input', () => {
@@ -2263,11 +2227,11 @@
 
     // Determine risk level based on violent crime count
     function getRiskLevel(violentCrimeCount) {
-      if (violentCrimeCount <= 2) {
+      if (violentCrimeCount === 0) {
         return { level: 'Low', icon: '🟢', color: '#4caf50' };
-      } else if (violentCrimeCount <= 10) {
+      } else if (violentCrimeCount <= 2) {
         return { level: 'Medium', icon: '🟡', color: '#ff9800' };
-      } else if (violentCrimeCount <= 20) {
+      } else if (violentCrimeCount <= 5) {
         return { level: 'High', icon: '🟠', color: '#f57c00' };
       } else {
         return { level: 'Very High', icon: '🔴', color: '#d32f2f' };
