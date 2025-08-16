@@ -1279,8 +1279,8 @@
         (position) => {
           clearTimeout(loadingTimeout);
           userLocation = {
-            lat: /*position.coords.latitude,*/ 39.9747,
-            lng:/* position.coords.longitude*/ -75.1605
+            lat: /*position.coords.latitude,*/ 39.95,
+            lng:/* position.coords.longitude*/ -75
           };
           updateLoadingStatus('Creating map...');
           createMap(userLocation);
@@ -1416,22 +1416,22 @@
             });
 
             // Add accuracy circle if accuracy is available
-            // if (navigator.geolocation) {
-            //   navigator.geolocation.getCurrentPosition((pos) => {
-            //     if (pos.coords.accuracy) {
-            //       new google.maps.Circle({
-            //         center: location,
-            //         radius: pos.coords.accuracy,
-            //         map: map,
-            //         fillColor: "#4285f4",
-            //         fillOpacity: 0.1,
-            //         strokeColor: "#4285f4",
-            //         strokeOpacity: 0.3,
-            //         strokeWeight: 1
-            //       });
-            //     }
-            //   });
-            // }
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition((pos) => {
+                if (pos.coords.accuracy) {
+                  new google.maps.Circle({
+                    center: location,
+                    radius: pos.coords.accuracy,
+                    map: map,
+                    fillColor: "#4285f4",
+                    fillOpacity: 0.1,
+                    strokeColor: "#4285f4",
+                    strokeOpacity: 0.3,
+                    strokeWeight: 1
+                  });
+                }
+              });
+            }
           } catch (markerError) {
             console.warn('Failed to create user marker:', markerError);
           }
@@ -1926,8 +1926,8 @@
               lng: p.lng,
               name: p.name
             };
-            plotCurrentPointWithCrime(selectedLocation);
-         //   await sleep(1000); // 1s delay before plotting the next one
+            plotCurrentPoint();
+            await sleep(500); // 0.5s delay before plotting the next one
           }
 
           console.log(`Total plotted: ${result.total_points}, Distance: ${result.total_distance_km} km`);
@@ -2698,7 +2698,7 @@
     }
 
     // Enhanced plotCurrentPoint with crime context
-    function plotCurrentPointWithCrime(selectedLocation) {
+    function plotCurrentPointWithCrime() {
       if (!selectedLocation) return;
       
       // Get crime data for the point being plotted
@@ -2747,7 +2747,7 @@
         plottedMarkers.push({ marker, point });
         
         // Clear selection
-        //selectedLocation = null;
+        selectedLocation = null;
         updatePlotPanel();
         
         // Auto-connect if more than one point
@@ -2761,56 +2761,6 @@
         // Fallback to original plotting function
         plotCurrentPoint();
       });
-    }
-
-    // Enhanced point info window with crime data
-    function showPointInfoWindowWithCrime(marker, point) {
-      const safetyRecommendations = getSafetyRecommendations(point.crimeData || {});
-      
-      const content = `
-        <div style="font-family: 'Segoe UI', sans-serif; max-width: 300px;">
-          <h4 style="margin: 0 0 8px 0; color: #333;">${point.name}</h4>
-          
-          <div style="background: ${point.riskLevel?.color}20; padding: 8px; border-radius: 6px; margin: 8px 0; border-left: 4px solid ${point.riskLevel?.color};">
-            <div style="font-weight: bold; color: ${point.riskLevel?.color}; margin-bottom: 4px;">
-              ${point.riskLevel?.icon} Safety Risk: ${point.riskLevel?.level}
-            </div>
-            <div style="font-size: 12px;">
-              Violent crimes within 500ft: ${point.crimeData?.violent_crimes || 0}
-            </div>
-          </div>
-          
-          <div style="font-size: 11px; color: #666; margin-bottom: 8px;">
-            Plotted: ${point.timestamp}<br>
-            Location: ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}
-          </div>
-          
-          <details style="margin: 8px 0;">
-            <summary style="cursor: pointer; font-weight: bold; font-size: 12px; color: #1976d2;">
-              Safety Recommendations
-            </summary>
-            <div style="margin-top: 8px; font-size: 11px; line-height: 1.4;">
-              ${safetyRecommendations.map(rec => `<div style="margin: 2px 0;">${rec}</div>`).join('')}
-            </div>
-          </details>
-          
-          <div style="display: flex; gap: 6px; margin-top: 8px;">
-            <button onclick="removePointById(${point.id})" 
-                    style="background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-              Remove Point
-            </button>
-            <button onclick="showCrimeDetails(${point.lat}, ${point.lng})" 
-                    style="background: #1976d2; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-              Crime Details
-            </button>
-          </div>
-        </div>
-      `;
-      
-      if (infoWindow) {
-        infoWindow.setContent(content);
-        infoWindow.open(map, marker);
-      }
     }
 
     // Enhanced point info window with crime data
