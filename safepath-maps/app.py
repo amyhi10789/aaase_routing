@@ -858,7 +858,7 @@ def load_crime_data():
     global crime_data
     try:
         # Load the CSV file
-        df = pd.read_csv('philly_crime_data.csv')
+        df = pd.read_csv('safepath-maps/philly_crime_data.csv')
         
         # Extract lat/lng from columns 17 and 18 (0-indexed: 16 and 17)
         if len(df.columns) >= 18:
